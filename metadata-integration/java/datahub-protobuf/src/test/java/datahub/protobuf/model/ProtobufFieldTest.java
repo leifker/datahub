@@ -57,19 +57,19 @@ public class ProtobufFieldTest {
 
         ProtobufField test = ProtobufField.builder()
                 .fieldProto(expectedField)
-                .protobufMessage(expectedMessage)
+                .parentSchema(expectedMessage)
                 .build();
 
         assertEquals("field1", test.name());
         assertEquals("protobuf.message1.field1", test.fullName());
         assertEquals("[type=bytes]", test.fieldPathType());
-        assertEquals("protobuf.message1", test.parentMessageName());
+        assertEquals("protobuf.message1", test.parentSchemaName());
         assertEquals(expectedMessage1, test.messageProto());
         assertEquals(expectedFile, test.fileProto());
         assertNull(test.oneOfProto());
         assertEquals("bytes", test.nativeType());
         assertFalse(test.isMessage());
-        assertEquals(1, test.sortWeight());
+        assertEquals(1, test.fieldOrder());
         assertEquals(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new BytesType())), test.schemaFieldDataType());
         assertEquals("ProtobufField[protobuf.message1.field1]", test.toString());
     }
@@ -95,7 +95,7 @@ public class ProtobufFieldTest {
 
             ProtobufField test = ProtobufField.builder()
                     .fieldProto(expectedField)
-                    .protobufMessage(EXPECTED_MESSAGE)
+                    .parentSchema(EXPECTED_MESSAGE)
                     .build();
 
             if (type.equals(FieldDescriptorProto.Type.TYPE_MESSAGE)) {
@@ -136,7 +136,7 @@ public class ProtobufFieldTest {
 
             ProtobufField test = ProtobufField.builder()
                     .fieldProto(expectedField)
-                    .protobufMessage(EXPECTED_MESSAGE)
+                    .parentSchema(EXPECTED_MESSAGE)
                     .build();
 
             if (type.equals(FieldDescriptorProto.Type.TYPE_MESSAGE)) {
@@ -174,7 +174,7 @@ public class ProtobufFieldTest {
 
             ProtobufField test = ProtobufField.builder()
                     .fieldProto(expectedField)
-                    .protobufMessage(EXPECTED_MESSAGE)
+                    .parentSchema(EXPECTED_MESSAGE)
                     .build();
 
             if (Set.of("TYPE_MESSAGE", "TYPE_GROUP").contains(type.name())) {
@@ -220,7 +220,7 @@ public class ProtobufFieldTest {
 
             ProtobufField test = ProtobufField.builder()
                     .fieldProto(expectedField)
-                    .protobufMessage(EXPECTED_MESSAGE)
+                    .parentSchema(EXPECTED_MESSAGE)
                     .build();
 
             assertEquals(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new ArrayType()

@@ -87,6 +87,7 @@ project.ext.externalDependency = [
     'jettyJaas': 'org.eclipse.jetty:jetty-jaas:9.4.32.v20200930',
     'jgrapht': 'org.jgrapht:jgrapht-core:1.5.1',
     'jsonSchemaAvro': 'com.github.fge:json-schema-avro:0.1.4',
+    'jsonSchema': 'com.networknt:json-schema-validator:1.0.71',
     'jsonSimple': 'com.googlecode.json-simple:json-simple:1.1.1',
     'junitJupiterApi': "org.junit.jupiter:junit-jupiter-api:$junitJupiterVersion",
     'junitJupiterParams': "org.junit.jupiter:junit-jupiter-params:$junitJupiterVersion",
@@ -95,7 +96,7 @@ project.ext.externalDependency = [
     'kafkaAvroSerde': 'io.confluent:kafka-streams-avro-serde:5.5.1',
     'kafkaClients': 'org.apache.kafka:kafka-clients:2.3.0',
     'logbackClassic': 'ch.qos.logback:logback-classic:1.2.9',
-    'lombok': 'org.projectlombok:lombok:1.18.12',
+    'lombok': 'org.projectlombok:lombok:1.18.14',
     'mariadbConnector': 'org.mariadb.jdbc:mariadb-java-client:2.6.0',
     'mavenArtifact': "org.apache.maven:maven-artifact:$mavenVersion",
     'mockito': 'org.mockito:mockito-core:3.0.0',
@@ -210,7 +211,7 @@ subprojects {
     }
   }
 
-  if (project.name != 'datahub-protobuf') {
+  if (!["datahub-protobuf", "datahub-jsonschema", "datahub-schemagraph-lib"].contains(project.name)) {
     tasks.withType(JavaCompile).configureEach {
       javaCompiler = javaToolchains.compilerFor {
         languageVersion = JavaLanguageVersion.of(8)

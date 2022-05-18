@@ -2,8 +2,8 @@ package datahub.protobuf.visitors.dataset;
 
 import com.linkedin.data.template.StringMap;
 import com.linkedin.dataset.DatasetProperties;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.protobuf.visitors.ProtobufVisitor;
+import datahub.protobuf.ProtobufContext;
 
 import java.util.Map;
 import java.util.Optional;
@@ -12,11 +12,11 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 
-public class KafkaTopicPropertyVisitor implements ProtobufModelVisitor<DatasetProperties> {
+public class KafkaTopicPropertyVisitor implements ProtobufVisitor<DatasetProperties> {
 
     @Override
-    public Stream<DatasetProperties> visitGraph(VisitContext context) {
-        return getKafkaTopic(context.root().comment()).stream().map(kafkaTopic ->
+    public Stream<DatasetProperties> visitGraph(ProtobufContext context) {
+        return getKafkaTopic(context.root().description()).stream().map(kafkaTopic ->
             new DatasetProperties()
                     .setCustomProperties(new StringMap(Map.of("kafka_topic", kafkaTopic)))
         );

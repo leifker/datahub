@@ -3,14 +3,9 @@ package datahub.protobuf.model;
 import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.ExtensionRegistry;
 import com.google.protobuf.InvalidProtocolBufferException;
+import datahub.integration.model.SchemaGraph;
 import datahub.protobuf.ProtobufUtils;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
-import org.jgrapht.GraphPath;
-import org.jgrapht.alg.shortestpath.AllDirectedPaths;
-import org.jgrapht.graph.DefaultDirectedGraph;
 
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -20,9 +15,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 
-public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTypeEdge> {
+public class ProtobufGraph extends SchemaGraph<ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge> {
     private final transient ProtobufMessage rootProtobufMessage;
-    private final transient AllDirectedPaths<ProtobufElement, FieldTypeEdge> directedPaths;
     private final transient ExtensionRegistry registry;
 
     public ProtobufGraph(DescriptorProtos.FileDescriptorSet fileSet) throws InvalidProtocolBufferException {
@@ -39,7 +33,7 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
 
     public ProtobufGraph(DescriptorProtos.FileDescriptorSet fileSet, String messageName, String filename,
                          boolean flattenGoogleWrapped) throws InvalidProtocolBufferException {
-        super(FieldTypeEdge.class);
+        super(ProtobufEdge.class);
         this.registry = ProtobufUtils.buildRegistry(fileSet);
         DescriptorProtos.FileDescriptorSet fileSetExtended = DescriptorProtos.FileDescriptorSet
                 .parseFrom(fileSet.toByteArray(), this.registry);
@@ -65,45 +59,29 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
                         .orElseThrow(() -> new IllegalArgumentException("Cannot autodetect root protobuf Message."));
             }
         }
-
-        this.directedPaths = new AllDirectedPaths<>(this);
-    }
-
-    public List<GraphPath<ProtobufElement, FieldTypeEdge>> getAllPaths(ProtobufElement a, ProtobufElement b) {
-        return directedPaths.getAllPaths(a, b, true, null);
     }
 
     public ExtensionRegistry getRegistry() {
         return registry;
     }
 
+    @Override
     public String getFullName() {
         return rootProtobufMessage.fullName();
     }
 
-    public int getMajorVersion() {
+    @Override
+    public long getMajorVersion() {
         return rootProtobufMessage.majorVersion();
     }
 
     public String getComment() {
-        return rootProtobufMessage.comment();
+        return rootProtobufMessage.description();
     }
 
+    @Override
     public ProtobufMessage root() {
         return rootProtobufMessage;
-    }
-
-
-    public <T, V extends ProtobufModelVisitor<T>> Stream<T> accept(VisitContext.VisitContextBuilder contextBuilder, Collection<V> visitors) {
-        VisitContext context = Optional.ofNullable(contextBuilder).orElse(VisitContext.builder()).graph(this).build();
-        return accept(context, visitors);
-    }
-
-    public <T, V extends ProtobufModelVisitor<T>> Stream<T> accept(VisitContext context, Collection<V> visitors) {
-        return Stream.concat(
-                visitors.stream().flatMap(visitor -> visitor.visitGraph(context)),
-                vertexSet().stream().flatMap(vertex -> visitors.stream().flatMap(visitor -> vertex.accept(visitor, context)))
-        );
     }
 
     protected Optional<ProtobufMessage> autodetectRootMessage(DescriptorProtos.FileDescriptorProto targetFile) throws IllegalArgumentException {
@@ -113,8 +91,8 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
                                 && v instanceof ProtobufMessage
                                 && incomingEdgesOf(v).isEmpty()
                                 && outgoingEdgesOf(v).stream()
-                                .flatMap(e -> incomingEdgesOf(e.getEdgeTarget()).stream())
-                                .allMatch(e -> e.getEdgeSource().equals(v))) // all the incoming edges on the child vertices should be self
+                                .flatMap(e -> incomingEdgesOf(e.edgeTarget()).stream())
+                                .allMatch(e -> e.edgeSource().equals(v))) // all the incoming edges on the child vertices should be self
                 .map(v -> (ProtobufMessage) v)
                 .findFirst();
     }
@@ -134,10 +112,10 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
                 .filter(v -> // incoming edges of fields
                         targetFile.equals(v.fileProto())
                                 && v instanceof ProtobufMessage
-                                && incomingEdgesOf(v).stream().noneMatch(e -> e.getEdgeSource().fileProto().equals(targetFile))
+                                && incomingEdgesOf(v).stream().noneMatch(e -> e.edgeSource().fileProto().equals(targetFile))
                                 && outgoingEdgesOf(v).stream() // all the incoming edges on the child vertices should be self within target file
-                                .flatMap(e -> incomingEdgesOf(e.getEdgeTarget()).stream())
-                                .allMatch(e -> !e.getEdgeSource().fileProto().equals(targetFile) || e.getEdgeSource().equals(v)))
+                                .flatMap(e -> incomingEdgesOf(e.edgeTarget()).stream())
+                                .allMatch(e -> !e.edgeSource().fileProto().equals(targetFile) || e.edgeSource().equals(v)))
                 .map(v -> (ProtobufMessage) v)
                 .findFirst();
     }
@@ -168,7 +146,7 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
                     // handle normal fields and oneofs
                     messageProto.getFieldList().forEach(fieldProto -> {
                         ProtobufField fieldVertex = ProtobufField.builder()
-                                .protobufMessage(messageVertex)
+                                .parentSchema(messageVertex)
                                 .fieldProto(fieldProto)
                                 .build();
 
@@ -187,14 +165,7 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
         );
 
         // attach field paths to root message
-        Map<String, List<ProtobufField>> fieldMap = vertexSet().stream()
-                .filter(v -> v instanceof ProtobufField && incomingEdgesOf(v).stream().noneMatch(e -> e.getEdgeSource() instanceof ProtobufOneOfField))
-                .map(v -> (ProtobufField) v)
-                .collect(Collectors.groupingBy(ProtobufField::parentMessageName));
-
-        edgeSet().stream().filter(FieldTypeEdge::isMessageType).collect(Collectors.toSet())
-                .stream().map(e -> (ProtobufField) e.getEdgeTarget())
-                .forEach(f -> attachNestedMessageFields(fieldMap, f));
+        attachNestedSchemaFields(ProtobufField.class);
     }
 
 
@@ -220,7 +191,7 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
 
             nestedMessageProto.getFieldList().forEach(nestedFieldProto -> {
                 ProtobufField field = ProtobufField.builder()
-                        .protobufMessage(nestedMessageVertex)
+                        .parentSchema(nestedMessageVertex)
                         .fieldProto(nestedFieldProto)
                         .build();
 
@@ -229,9 +200,9 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
 
                 // Add schema to field edge
                 if (!field.isMessage()) {
-                    FieldTypeEdge.builder()
-                            .edgeSource(nestedMessageVertex)
-                            .edgeTarget(field)
+                    ProtobufEdge.builder()
+                            .source(nestedMessageVertex)
+                            .target(field)
                             .type(field.fieldPathType())
                             .build().inGraph(this);
                 }
@@ -243,20 +214,20 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
         // Handle oneOf
         ProtobufField oneOfVertex = ProtobufOneOfField.oneOfBuilder()
                 .protobufMessage(messageVertex)
-                .fieldProto(fieldVertex.getFieldProto())
+                .fieldProto(fieldVertex.fieldProto())
                 .build();
         addVertex(oneOfVertex);
 
-        FieldTypeEdge.builder()
-                .edgeSource(messageVertex)
-                .edgeTarget(oneOfVertex)
+        ProtobufEdge.builder()
+                .source(messageVertex)
+                .target(oneOfVertex)
                 .type(oneOfVertex.fieldPathType())
                 .build().inGraph(this);
 
         // Add oneOf field to field edge
-        FieldTypeEdge.builder()
-                .edgeSource(oneOfVertex)
-                .edgeTarget(fieldVertex)
+        ProtobufEdge.builder()
+                .source(oneOfVertex)
+                .target(fieldVertex)
                 .type(fieldVertex.fieldPathType())
                 .isMessageType(fieldVertex.isMessage())
                 .build().inGraph(this);
@@ -265,9 +236,9 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
     }
 
     private Stream<ProtobufField> linkMessageToField(ProtobufMessage messageVertex, ProtobufField fieldVertex) {
-        FieldTypeEdge.builder()
-                .edgeSource(messageVertex)
-                .edgeTarget(fieldVertex)
+        ProtobufEdge.builder()
+                .source(messageVertex)
+                .target(fieldVertex)
                 .type(fieldVertex.fieldPathType())
                 .isMessageType(fieldVertex.isMessage())
                 .build().inGraph(this);
@@ -275,11 +246,12 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
         return Stream.of(fieldVertex);
     }
 
-    private void attachNestedMessageFields(Map<String, List<ProtobufField>> fieldMap, ProtobufField messageField) {
+    @Override
+    protected void attachNestedSchemaFields(Map<String, List<ProtobufField>> fieldMap, ProtobufField messageField) {
         fieldMap.getOrDefault(messageField.nativeType(), List.of()).forEach(target -> {
-            FieldTypeEdge.builder()
-                    .edgeSource(messageField)
-                    .edgeTarget(target)
+            ProtobufEdge.builder()
+                    .source(messageField)
+                    .target(target)
                     .type(target.fieldPathType())
                     .isMessageType(target.isMessage())
                     .build().inGraph(this);
@@ -289,9 +261,9 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
     private static final Set<String> GOOGLE_WRAPPERS = Set.of("google/protobuf/wrappers.proto", "google/protobuf/timestamp.proto");
     private void flattenGoogleWrapped() {
         HashSet<ProtobufElement> removeVertices = new HashSet<>();
-        HashSet<FieldTypeEdge> removeEdges = new HashSet<>();
+        HashSet<ProtobufEdge> removeEdges = new HashSet<>();
         HashSet<ProtobufElement> addVertices = new HashSet<>();
-        HashSet<FieldTypeEdge> addEdges = new HashSet<>();
+        HashSet<ProtobufEdge> addEdges = new HashSet<>();
 
         Set<ProtobufElement> googleWrapped = vertexSet().stream()
                 .filter(v -> v instanceof ProtobufMessage
@@ -301,7 +273,7 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
 
         Set<ProtobufField> wrappedPrimitiveFields = googleWrapped.stream()
                 .flatMap(wrapped -> outgoingEdgesOf(wrapped).stream())
-                .map(FieldTypeEdge::getEdgeTarget)
+                .map(ProtobufEdge::edgeTarget)
                 .map(ProtobufField.class::cast)
                 .collect(Collectors.toSet());
         removeVertices.addAll(wrappedPrimitiveFields);
@@ -311,7 +283,7 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
             removeEdges.addAll(incomingEdgesOf(primitiveField));
 
             Set<ProtobufField> originatingFields = incomingEdgesOf(primitiveField).stream()
-                    .map(FieldTypeEdge::getEdgeSource)
+                    .map(ProtobufEdge::edgeSource)
                     .filter(edgeSource -> !googleWrapped.contains(edgeSource))
                     .map(ProtobufField.class::cast)
                     .collect(Collectors.toSet());
@@ -322,18 +294,18 @@ public class ProtobufGraph extends DefaultDirectedGraph<ProtobufElement, FieldTy
                 ProtobufElement fieldVertex = originatingField.toBuilder()
                         .fieldPathType(primitiveField.fieldPathType())
                         .schemaFieldDataType(primitiveField.schemaFieldDataType())
-                        .isMessageType(false)
+                        .isNestedType(false)
                         .build();
                 addVertices.add(fieldVertex);
 
                 // link source field parent directly to primitive
-                Set<FieldTypeEdge> incomingEdges = incomingEdgesOf(originatingField);
+                Set<ProtobufEdge> incomingEdges = incomingEdgesOf(originatingField);
                 removeEdges.addAll(incomingEdgesOf(originatingField));
                 addEdges.addAll(incomingEdges.stream().map(oldEdge ->
                         // Replace old edge with new edge to primitive
-                        FieldTypeEdge.builder()
-                                .edgeSource(oldEdge.getEdgeSource())
-                                .edgeTarget(fieldVertex)
+                        ProtobufEdge.builder()
+                                .source(oldEdge.edgeSource())
+                                .target(fieldVertex)
                                 .type(primitiveField.fieldPathType())
                                 .isMessageType(false) // known primitive
                                 .build()).collect(Collectors.toSet()));

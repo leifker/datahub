@@ -19,7 +19,10 @@ public class ProtobufOneOfField extends ProtobufField {
     @Builder(builderMethodName = "oneOfBuilder")
     public ProtobufOneOfField(ProtobufMessage protobufMessage,
                               FieldDescriptorProto fieldProto) {
-        super(protobufMessage, fieldProto, null, null, null, null);
+
+        super(ProtobufField.builder()
+                .parentSchema(protobufMessage)
+                .fieldProto(fieldProto));
     }
 
     @Override
@@ -43,12 +46,17 @@ public class ProtobufOneOfField extends ProtobufField {
     }
 
     @Override
+    public boolean isOneAnyOf() {
+        return true;
+    }
+
+    @Override
     public SchemaFieldDataType schemaFieldDataType() throws IllegalStateException {
         return new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new UnionType()));
     }
 
     @Override
-    public String comment() {
+    public String description() {
         return messageLocations()
                 .filter(loc -> loc.getPathCount() > 3
                         && loc.getPath(2) == DescriptorProto.ONEOF_DECL_FIELD_NUMBER

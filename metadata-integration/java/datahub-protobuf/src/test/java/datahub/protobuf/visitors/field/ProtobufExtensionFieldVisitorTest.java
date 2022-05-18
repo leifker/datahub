@@ -14,11 +14,11 @@ import com.linkedin.schema.SchemaField;
 import com.linkedin.schema.SchemaFieldDataType;
 import com.linkedin.schema.StringType;
 import com.linkedin.util.Pair;
+import datahub.protobuf.ProtobufContext;
 import datahub.protobuf.ProtobufDataset;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -30,10 +30,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class ProtobufExtensionFieldVisitorTest {
 
     @Test
-    public void extendedMessageTest() throws IOException, URISyntaxException {
+    public void extendedMessageTest() throws IOException {
+        ProtobufContext context = getContext("extended_protobuf", "messageA", "extended_protobuf.Person");
         ProtobufExtensionFieldVisitor test = new ProtobufExtensionFieldVisitor();
-        List<SchemaField> actual = getTestProtobufGraph("extended_protobuf", "messageA")
-                .accept(getVisitContextBuilder("extended_protobuf.Person"), List.of(test))
+        List<SchemaField> actual = context.accept(List.of(test))
                 .sorted(ProtobufDataset.COMPARE_BY_ROOT_MESSAGE_FIELD_WEIGHT.thenComparing(ProtobufDataset.COMPARE_BY_FIELD_PATH))
                 .map(Pair::getFirst)
                 .collect(Collectors.toList());
@@ -117,9 +117,9 @@ public class ProtobufExtensionFieldVisitorTest {
 
     @Test
     public void extendedFieldTest() throws IOException {
+        ProtobufContext context = getContext("extended_protobuf", "messageB", "extended_protobuf.Person");
         ProtobufExtensionFieldVisitor test = new ProtobufExtensionFieldVisitor();
-        List<SchemaField> actual = getTestProtobufGraph("extended_protobuf", "messageB")
-                .accept(getVisitContextBuilder("extended_protobuf.Person"), List.of(test))
+        List<SchemaField> actual = context.accept(List.of(test))
                 .sorted(ProtobufDataset.COMPARE_BY_ROOT_MESSAGE_FIELD_WEIGHT.thenComparing(ProtobufDataset.COMPARE_BY_FIELD_PATH))
                 .map(Pair::getFirst)
                 .collect(Collectors.toList());

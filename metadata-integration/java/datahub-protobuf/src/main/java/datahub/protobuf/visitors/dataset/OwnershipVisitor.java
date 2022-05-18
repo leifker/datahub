@@ -6,8 +6,8 @@ import com.linkedin.common.OwnershipSourceType;
 import com.linkedin.common.OwnershipType;
 import com.linkedin.common.urn.Urn;
 import datahub.protobuf.visitors.ProtobufExtensionUtil;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.protobuf.visitors.ProtobufVisitor;
+import datahub.protobuf.ProtobufContext;
 
 import java.net.URISyntaxException;
 import java.util.Collection;
@@ -17,11 +17,11 @@ import java.util.stream.Stream;
 
 import static datahub.protobuf.ProtobufUtils.getMessageOptions;
 
-public class OwnershipVisitor implements ProtobufModelVisitor<Owner> {
+public class OwnershipVisitor implements ProtobufVisitor<Owner> {
 
     @Override
-    public Stream<Owner> visitGraph(VisitContext context) {
-        return ProtobufExtensionUtil.filterByDataHubType(getMessageOptions(context.root().messageProto()), context.getGraph().getRegistry(),
+    public Stream<Owner> visitGraph(ProtobufContext context) {
+        return ProtobufExtensionUtil.filterByDataHubType(getMessageOptions(context.root().messageProto()), context.graph().getRegistry(),
                         ProtobufExtensionUtil.DataHubMetadataType.OWNER)
                 .stream()
                 .flatMap(extEntry -> {

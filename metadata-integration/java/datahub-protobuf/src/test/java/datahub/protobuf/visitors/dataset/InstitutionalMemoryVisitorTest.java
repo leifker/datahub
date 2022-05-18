@@ -2,6 +2,9 @@ package datahub.protobuf.visitors.dataset;
 
 import com.linkedin.common.InstitutionalMemoryMetadata;
 import com.linkedin.common.url.Url;
+import datahub.integration.visitors.InstitutionalMemoryVisitor;
+import datahub.protobuf.ProtobufContext;
+import datahub.protobuf.model.*;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -17,7 +20,9 @@ public class InstitutionalMemoryVisitorTest {
 
     @Test
     public void messageATest() throws IOException {
-        InstitutionalMemoryVisitor test = new InstitutionalMemoryVisitor("SLACK123", "myOrg");
+        ProtobufContext context = getContext("protobuf", "messageA", "protobuf.MessageA");
+        InstitutionalMemoryVisitor<ProtobufGraph, ProtobufContext, ProtobufElement, ProtobufMessage,
+                ProtobufField, ProtobufEdge> test = new InstitutionalMemoryVisitor<>("SLACK123", "myOrg");
         assertEquals(Set.of(new InstitutionalMemoryMetadata()
                                 .setCreateStamp(TEST_AUDIT_STAMP)
                                 .setDescription("Slack Channel")
@@ -44,25 +49,23 @@ public class InstitutionalMemoryVisitorTest {
                                 .setUrl(new Url("https://developers.google.com/protocol-buffers/docs/proto3#maps"))
                         ),
 
-                getTestProtobufGraph("protobuf", "messageA")
-                        .accept(getVisitContextBuilder("protobuf.MessageA"),
-                        List.of(test)).collect(Collectors.toSet()));
+                context.accept(List.of(test)).collect(Collectors.toSet()));
     }
 
     @Test
     public void messageBTest() throws IOException {
-        InstitutionalMemoryVisitor test = new InstitutionalMemoryVisitor("SLACK123", "myOrg");
+        ProtobufContext context = getContext("protobuf", "messageB", "protobuf.MessageB");
+        InstitutionalMemoryVisitor<ProtobufGraph, ProtobufContext, ProtobufElement, ProtobufMessage,
+                ProtobufField, ProtobufEdge> test = new InstitutionalMemoryVisitor<>("SLACK123", "myOrg");
         assertEquals(Set.of(),
-                getTestProtobufGraph("protobuf", "messageB")
-                        .accept(getVisitContextBuilder("protobuf.MessageB"),
-                                List.of(test)).collect(Collectors.toSet()));
+                context.accept(List.of(test)).collect(Collectors.toSet()));
     }
 
     @Test
     public void messageCTest() throws IOException {
-        InstitutionalMemoryVisitor test = new InstitutionalMemoryVisitor("SLACK123", "myOrg");
-        assertEquals(Set.of(), getTestProtobufGraph("protobuf", "messageC")
-                .accept(getVisitContextBuilder("protobuf.MessageC"),
-                        List.of(test)).collect(Collectors.toSet()));
+        ProtobufContext context = getContext("protobuf", "messageC", "protobuf.MessageC");
+        InstitutionalMemoryVisitor<ProtobufGraph, ProtobufContext, ProtobufElement, ProtobufMessage,
+                ProtobufField, ProtobufEdge> test = new InstitutionalMemoryVisitor<>("SLACK123", "myOrg");
+        assertEquals(Set.of(), context.accept(List.of(test)).collect(Collectors.toSet()));
     }
 }

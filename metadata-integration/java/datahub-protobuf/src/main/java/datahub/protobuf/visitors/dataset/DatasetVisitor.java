@@ -21,9 +21,10 @@ import com.linkedin.data.template.StringMap;
 import com.linkedin.dataset.DatasetProperties;
 import com.linkedin.domain.Domains;
 import com.linkedin.events.metadata.ChangeType;
-import datahub.protobuf.model.ProtobufGraph;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.integration.visitors.InstitutionalMemoryVisitor;
+import datahub.protobuf.model.*;
+import datahub.protobuf.visitors.ProtobufVisitor;
+import datahub.protobuf.ProtobufContext;
 import datahub.event.MetadataChangeProposalWrapper;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -38,30 +39,31 @@ import java.util.stream.Stream;
 
 @Builder
 @AllArgsConstructor
-public class DatasetVisitor implements ProtobufModelVisitor<MetadataChangeProposalWrapper<? extends RecordTemplate>> {
+public class DatasetVisitor implements ProtobufVisitor<MetadataChangeProposalWrapper<? extends RecordTemplate>> {
     @Builder.Default
-    private final List<ProtobufModelVisitor<InstitutionalMemoryMetadata>> institutionalMemoryMetadataVisitors = List.of();
+    private final List<InstitutionalMemoryVisitor<ProtobufGraph, ProtobufContext, ProtobufElement, ProtobufMessage,
+            ProtobufField, ProtobufEdge>> institutionalMemoryMetadataVisitors = List.of();
     @Builder.Default
-    private final List<ProtobufModelVisitor<DatasetProperties>> datasetPropertyVisitors = List.of();
+    private final List<ProtobufVisitor<DatasetProperties>> datasetPropertyVisitors = List.of();
     @Builder.Default
-    private final List<ProtobufModelVisitor<TagAssociation>> tagAssociationVisitors = List.of();
+    private final List<ProtobufVisitor<TagAssociation>> tagAssociationVisitors = List.of();
     @Builder.Default
-    private final List<ProtobufModelVisitor<GlossaryTermAssociation>> termAssociationVisitors = List.of();
+    private final List<ProtobufVisitor<GlossaryTermAssociation>> termAssociationVisitors = List.of();
     @Builder.Default
-    private final List<ProtobufModelVisitor<Owner>> ownershipVisitors = List.of();
+    private final List<ProtobufVisitor<Owner>> ownershipVisitors = List.of();
     @Builder.Default
-    private final List<ProtobufModelVisitor<com.linkedin.common.urn.Urn>> domainVisitors = List.of();
+    private final List<ProtobufVisitor<com.linkedin.common.urn.Urn>> domainVisitors = List.of();
     @Builder.Default
     private final String protocBase64 = "";
     @Builder.Default
-    private final ProtobufModelVisitor<String> descriptionVisitor = new DescriptionVisitor();
+    private final ProtobufVisitor<String> descriptionVisitor = new DescriptionVisitor();
     @Builder.Default
-    private final ProtobufModelVisitor<Deprecation> deprecationVisitor = new DeprecationVisitor();
+    private final ProtobufVisitor<Deprecation> deprecationVisitor = new DeprecationVisitor();
 
     @Override
-    public Stream<MetadataChangeProposalWrapper<? extends RecordTemplate>> visitGraph(VisitContext context) {
+    public Stream<MetadataChangeProposalWrapper<? extends RecordTemplate>> visitGraph(ProtobufContext context) {
         final String datasetUrn = context.getDatasetUrn().toString();
-        final ProtobufGraph g = context.getGraph();
+        final ProtobufGraph g = context.graph();
 
         return Stream.of(
                 new MetadataChangeProposalWrapper<>(DatasetUrn.ENTITY_TYPE, datasetUrn, ChangeType.UPSERT, new DatasetProperties()

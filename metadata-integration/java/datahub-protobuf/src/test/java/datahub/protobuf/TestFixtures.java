@@ -10,7 +10,6 @@ import com.linkedin.data.DataMap;
 import com.linkedin.data.template.RecordTemplate;
 import datahub.event.MetadataChangeProposalWrapper;
 import datahub.protobuf.model.ProtobufGraph;
-import datahub.protobuf.visitors.VisitContext;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -25,22 +24,22 @@ public class TestFixtures {
             .setTime(System.currentTimeMillis())
             .setActor(new CorpuserUrn("datahub"));
 
-    public static InputStream getTestProtoc(String protoPackage, String filename) {
+    public static InputStream getProtoc(String protoPackage, String filename) {
         return Objects.requireNonNull(TestFixtures.class.getClassLoader()
                 .getResourceAsStream(String.format("%s/%s.protoc", protoPackage, filename)));
     }
 
-    public static String getTestProtoSource(String protoPackage, String filename) throws IOException {
+    public static String getProtoSource(String protoPackage, String filename) throws IOException {
         return new String(Objects.requireNonNull(TestFixtures.class.getClassLoader()
                 .getResourceAsStream(String.format("%s/%s.proto", protoPackage, filename))).readAllBytes(),
                 StandardCharsets.UTF_8);
     }
 
-    public static ProtobufDataset getTestProtobufDataset(String protoPackage, String filename) throws IOException {
+    public static ProtobufDataset getDataset(String protoPackage, String filename) throws IOException {
         return ProtobufDataset.builder()
                 .setDataPlatformUrn(TEST_DATA_PLATFORM)
-                .setSchema(getTestProtoSource(protoPackage, filename))
-                .setProtocIn(getTestProtoc(protoPackage, filename))
+                .setSchema(getProtoSource(protoPackage, filename))
+                .setProtocIn(getProtoc(protoPackage, filename))
                 .setAuditStamp(TEST_AUDIT_STAMP)
                 .setFabricType(FabricType.TEST)
                 .setGithubOrganization("myOrg")
@@ -48,19 +47,21 @@ public class TestFixtures {
                 .build();
     }
 
-    public static DescriptorProtos.FileDescriptorSet getTestProtobufFileSet(String protoPackage, String filename) throws IOException {
+    public static DescriptorProtos.FileDescriptorSet getFileSet(String protoPackage, String filename) throws IOException {
         return DescriptorProtos.FileDescriptorSet
-                .parseFrom(getTestProtoc(protoPackage, filename).readAllBytes());
+                .parseFrom(getProtoc(protoPackage, filename).readAllBytes());
     }
 
-    public static VisitContext.VisitContextBuilder getVisitContextBuilder(String message) {
-        return VisitContext.builder()
+    public static ProtobufContext getContext(String protoPackage, String filename, String message) throws IOException {
+        return ProtobufContext.builder()
                 .datasetUrn(new DatasetUrn(TEST_DATA_PLATFORM, message, FabricType.TEST))
-                .auditStamp(TEST_AUDIT_STAMP);
+                .auditStamp(TEST_AUDIT_STAMP)
+                .graph(getGraph(protoPackage, filename))
+                .build();
     }
 
-    public static ProtobufGraph getTestProtobufGraph(String protoPackage, String filename) throws IOException {
-        return new ProtobufGraph(getTestProtobufFileSet(protoPackage, filename));
+    public static ProtobufGraph getGraph(String protoPackage, String filename) throws IOException {
+        return new ProtobufGraph(getFileSet(protoPackage, filename));
     }
 
     public static Object extractAspect(MetadataChangeProposalWrapper<? extends RecordTemplate> mcp, String aspect) {

@@ -24,8 +24,7 @@ import com.linkedin.schema.StringType;
 import com.linkedin.schema.UnionType;
 import com.linkedin.util.Pair;
 import datahub.protobuf.model.ProtobufField;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.protobuf.visitors.ProtobufVisitor;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -44,7 +43,7 @@ public class ProtobufDatasetTest {
     public void noSchemaTest() throws IOException {
         ProtobufDataset dataset = ProtobufDataset.builder()
                 .setDataPlatformUrn(new DataPlatformUrn("kafka"))
-                .setProtocIn(getTestProtoc("protobuf", "messageA"))
+                .setProtocIn(getProtoc("protobuf", "messageA"))
                 .setAuditStamp(TEST_AUDIT_STAMP)
                 .setFabricType(FabricType.DEV)
                 .build();
@@ -57,13 +56,13 @@ public class ProtobufDatasetTest {
 
     @Test
     public void platformSchemaTest() throws IOException {
-        assertEquals(getTestProtoSource("protobuf", "messageA"),
-                extractDocumentSchema(getTestProtobufDataset("protobuf", "messageA")));
+        assertEquals(getProtoSource("protobuf", "messageA"),
+                extractDocumentSchema(getDataset("protobuf", "messageA")));
     }
 
     @Test
     public void messageA() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageA");
+        ProtobufDataset test = getDataset("protobuf", "messageA");
 
         assertEquals("urn:li:dataset:(urn:li:dataPlatform:kafka,protobuf.MessageA,TEST)",
                 test.getDatasetUrn().toString());
@@ -169,7 +168,7 @@ public class ProtobufDatasetTest {
 
     @Test
     public void messageB() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageB");
+        ProtobufDataset test = getDataset("protobuf", "messageB");
 
         assertEquals("urn:li:dataset:(urn:li:dataPlatform:kafka,protobuf.MessageB,TEST)",
                 test.getDatasetUrn().toString());
@@ -219,7 +218,7 @@ public class ProtobufDatasetTest {
 
     @Test
     public void messageC() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageC");
+        ProtobufDataset test = getDataset("protobuf", "messageC");
 
 
         assertEquals("urn:li:dataset:(urn:li:dataPlatform:kafka,protobuf.MessageC,TEST)",
@@ -270,7 +269,7 @@ public class ProtobufDatasetTest {
     @Test
     @SuppressWarnings("LineLength")
     public void messageC2NestedOneOf() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageC2");
+        ProtobufDataset test = getDataset("protobuf", "messageC2");
 
 
         assertEquals("urn:li:dataset:(urn:li:dataPlatform:kafka,protobuf.MessageC1,TEST)",
@@ -356,11 +355,11 @@ public class ProtobufDatasetTest {
 
     @Test
     public void customFieldVisitors() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageA");
+        ProtobufDataset test = getDataset("protobuf", "messageA");
 
-        test.setFieldVisitor(new ProtobufModelVisitor<Pair<SchemaField, Double>>() {
+        test.setFieldVisitor(new ProtobufVisitor<Pair<SchemaField, Double>>() {
             @Override
-            public Stream<Pair<SchemaField, Double>> visitField(ProtobufField field, VisitContext context) {
+            public Stream<Pair<SchemaField, Double>> visitField(ProtobufField field, ProtobufContext context) {
                 if (field.fullName().equals("protobuf.MessageA.sequence_id")) {
                     return Stream.of(Pair.of(
                             new SchemaField()
@@ -383,7 +382,7 @@ public class ProtobufDatasetTest {
 
     @Test
     public void duplicateNested() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageB");
+        ProtobufDataset test = getDataset("protobuf", "messageB");
 
         assertEquals("urn:li:dataset:(urn:li:dataPlatform:kafka,protobuf.MessageB,TEST)",
                 test.getDatasetUrn().toString());
@@ -429,7 +428,7 @@ public class ProtobufDatasetTest {
 
     @Test
     public void googleTimestamp() throws IOException {
-        ProtobufDataset test = getTestProtobufDataset("protobuf", "messageB");
+        ProtobufDataset test = getDataset("protobuf", "messageB");
 
         assertEquals("urn:li:dataset:(urn:li:dataPlatform:kafka,protobuf.MessageB,TEST)",
                 test.getDatasetUrn().toString());

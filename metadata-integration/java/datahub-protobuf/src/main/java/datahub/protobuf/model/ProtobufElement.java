@@ -3,20 +3,13 @@ package datahub.protobuf.model;
 import com.google.protobuf.DescriptorProtos.DescriptorProto;
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto;
 import com.google.protobuf.DescriptorProtos.SourceCodeInfo;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.integration.model.Node;
 
 import java.util.List;
 import java.util.stream.Stream;
 
 
-public interface ProtobufElement {
-    String name();
-    String fullName();
-    String nativeType();
-    String comment();
-    String fieldPathType();
-
+public interface ProtobufElement extends Node<ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge> {
     FileDescriptorProto fileProto();
     DescriptorProto messageProto();
 
@@ -27,6 +20,4 @@ public interface ProtobufElement {
                         && loc.getPath(0) == FileDescriptorProto.MESSAGE_TYPE_FIELD_NUMBER
                         && messageProto() == fileProto().getMessageType(loc.getPath(1)));
     }
-
-    <T> Stream<T> accept(ProtobufModelVisitor<T> v, VisitContext context);
 }

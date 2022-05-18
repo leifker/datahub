@@ -1,14 +1,14 @@
 package datahub.protobuf.visitors.dataset;
 
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.protobuf.visitors.ProtobufVisitor;
+import datahub.protobuf.ProtobufContext;
 
 import java.util.stream.Stream;
 
-public class DescriptionVisitor implements ProtobufModelVisitor<String> {
+public class DescriptionVisitor implements ProtobufVisitor<String> {
 
     @Override
-    public Stream<String> visitGraph(VisitContext context) {
-        return Stream.of(context.root().comment());
+    public Stream<String> visitGraph(ProtobufContext context) {
+        return Stream.of(context.root().description());
     }
 }

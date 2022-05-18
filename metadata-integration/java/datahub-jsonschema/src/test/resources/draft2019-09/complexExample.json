@@ -1,0 +1,75 @@
+{
+  "$id" : "https://example.com/v2/person.json",
+  "$schema" : "https://json-schema.org/draft/2019-09/schema",
+  "title" : "Person",
+  "type" : "object",
+  "properties" : {
+    "firstName1" : {
+      "type" : "string"
+    },
+    "firstName2" : {
+      "type" : "string"
+    },
+    "lastName" : {
+      "$ref": "#/$defs/name"
+    },
+    "birthday" : {
+        "allOf": [
+          {"type": "string"},
+          {"minLength": 10}
+        ]
+    },
+    "has_children" : {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "boolean"}
+      ]
+    },
+    "address" : {
+      "type" : "object",
+      "description" : "See some link here https://json-schema.org",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "street_address" : { "type" : "string" },
+            "city" : { "type" : "string" },
+            "State":   { "type": "string" },
+            "ZipCode": { "type": "string" }
+          },
+          "required": [ "ZipCode" ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "street_address" : { "type" : "string" },
+            "city" : { "type" : "string" },
+            "County":   { "type": "string" },
+            "PostCode": { "type": "string" }
+          },
+          "required": [ "PostCode" ]
+        }
+      ]
+    }
+  },
+  "oneOf":[
+    {
+      "required": [
+        "firstName1",
+        "lastName"
+      ]
+    },
+    {
+      "required": [
+        "firstName2",
+        "lastName"
+      ]
+    }
+  ],
+  "deprecated" : true,
+  "readOnly" : true,
+  "writeOnly" : false,
+  "$defs": {
+    "name": { "type": "string", "description" : "A def for a person's name." }
+  }
+}

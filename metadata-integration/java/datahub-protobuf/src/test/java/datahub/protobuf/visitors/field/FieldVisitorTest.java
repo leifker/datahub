@@ -6,7 +6,14 @@ import com.linkedin.schema.SchemaFieldDataType;
 import com.linkedin.schema.StringType;
 import com.linkedin.schema.UnionType;
 import com.linkedin.util.Pair;
+import datahub.integration.visitors.FieldVisitor;
+import datahub.protobuf.ProtobufContext;
 import datahub.protobuf.ProtobufDataset;
+import datahub.protobuf.model.ProtobufEdge;
+import datahub.protobuf.model.ProtobufElement;
+import datahub.protobuf.model.ProtobufField;
+import datahub.protobuf.model.ProtobufGraph;
+import datahub.protobuf.model.ProtobufMessage;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -14,12 +21,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static datahub.protobuf.TestFixtures.getTestProtobufGraph;
-import static datahub.protobuf.TestFixtures.getVisitContextBuilder;
+import static datahub.protobuf.TestFixtures.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
-public class SchemaFieldVisitorTest {
+public class FieldVisitorTest {
 
     @Test
     public void visitorTest() throws IOException {
@@ -30,6 +36,7 @@ public class SchemaFieldVisitorTest {
                                 .setNullable(true)
                                 .setDescription("one of field comment")
                                 .setNativeDataType("oneof")
+                                .setIsPartOfKey(false)
                                 .setType(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new UnionType()))),
                         1),
                 Pair.of(
@@ -38,6 +45,7 @@ public class SchemaFieldVisitorTest {
                                 .setNullable(true)
                                 .setDescription("one of string comment")
                                 .setNativeDataType("string")
+                                .setIsPartOfKey(false)
                                 .setType(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new StringType()))),
                         1),
                 Pair.of(
@@ -46,6 +54,7 @@ public class SchemaFieldVisitorTest {
                                 .setNullable(true)
                                 .setDescription("one of int comment")
                                 .setNativeDataType("int32")
+                                .setIsPartOfKey(false)
                                 .setType(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new NumberType()))),
                         2),
                 Pair.of(
@@ -54,13 +63,14 @@ public class SchemaFieldVisitorTest {
                                 .setNullable(true)
                                 .setDescription("")
                                 .setNativeDataType("string")
+                                .setIsPartOfKey(false)
                                 .setType(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new StringType()))),
                         4)
         ).map(Pair::getFirst).collect(Collectors.toList());
 
-        SchemaFieldVisitor test = new SchemaFieldVisitor();
-        assertEquals(expected, getTestProtobufGraph("protobuf", "messageC")
-                .accept(getVisitContextBuilder("protobuf.MessageC"), List.of(test))
+        ProtobufContext context = getContext("protobuf", "messageC", "protobuf.MessageC");
+        FieldVisitor<ProtobufGraph, ProtobufContext, ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge> test = new FieldVisitor<>(ProtobufField.class);
+        assertEquals(expected, context.accept(List.of(test))
                 .sorted(ProtobufDataset.COMPARE_BY_ROOT_MESSAGE_FIELD_WEIGHT.thenComparing(ProtobufDataset.COMPARE_BY_FIELD_PATH))
                 .map(Pair::getFirst)
                 .collect(Collectors.toList()));

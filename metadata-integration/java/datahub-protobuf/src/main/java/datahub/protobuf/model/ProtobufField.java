@@ -14,49 +14,59 @@ import com.linkedin.schema.NumberType;
 import com.linkedin.schema.RecordType;
 import com.linkedin.schema.SchemaFieldDataType;
 import com.linkedin.schema.StringType;
+import com.linkedin.util.Pair;
+import datahub.integration.SchemaContext;
+import datahub.integration.SchemaVisitor;
+import datahub.integration.model.FieldNode;
+import datahub.integration.model.SchemaGraph;
 import datahub.protobuf.ProtobufUtils;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Getter;
+import lombok.experimental.Accessors;
+import lombok.experimental.SuperBuilder;
 
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static datahub.protobuf.ProtobufUtils.getFieldOptions;
 
-@Builder(toBuilder = true)
+
+@SuperBuilder(toBuilder = true)
+@Accessors(fluent = true)
 @Getter
-@AllArgsConstructor
-public class ProtobufField implements ProtobufElement {
-
-    private final ProtobufMessage protobufMessage;
+public class ProtobufField extends FieldNode<ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge> implements ProtobufElement {
+    private final ProtobufMessage parentSchema;
     private final FieldDescriptorProto fieldProto;
     private final String nativeType;
-    private final String fieldPathType;
-    private final Boolean isMessageType;
+    private final Boolean isNestedType;
     private final SchemaFieldDataType schemaFieldDataType;
 
     public OneofDescriptorProto oneOfProto() {
         if (fieldProto.hasOneofIndex()) {
-            return protobufMessage.messageProto().getOneofDecl(fieldProto.getOneofIndex());
+            return parentSchema.messageProto().getOneofDecl(fieldProto.getOneofIndex());
         }
         return null;
     }
 
     @Override
+    public boolean nullable() {
+        return !isPrimaryKey();
+    }
+
+    @Override
+    public boolean isPrimaryKey() {
+        return getFieldOptions(fieldProto).stream().map(Pair::getKey)
+                .anyMatch(fieldDesc -> fieldDesc.getName().matches("(?i).*primary_?key"));
+    }
+
+    @Override
     public FileDescriptorProto fileProto() {
-        return protobufMessage.fileProto();
+        return parentSchema.fileProto();
     }
 
     @Override
     public DescriptorProto messageProto() {
-        return protobufMessage.messageProto();
-    }
-
-    public String parentMessageName() {
-        return protobufMessage.fullName();
+        return parentSchema.messageProto();
     }
 
     @Override
@@ -66,11 +76,7 @@ public class ProtobufField implements ProtobufElement {
 
     @Override
     public String fullName() {
-        return String.join(".", parentMessageName(), name());
-    }
-
-    public String getNativeType() {
-        return nativeType();
+        return String.join(".", parentSchemaName(), name());
     }
 
     public int getNumber() { 
@@ -147,14 +153,16 @@ public class ProtobufField implements ProtobufElement {
     }
 
     public boolean isMessage() {
-        return Optional.ofNullable(isMessageType).orElseGet(() ->
+        return Optional.ofNullable(isNestedType).orElseGet(() ->
                     fieldProto.getType().equals(FieldDescriptorProto.Type.TYPE_MESSAGE));
     }
 
-    public int sortWeight() {
+    @Override
+    public int fieldOrder() {
         return messageProto().getFieldList().indexOf(fieldProto) + 1;
     }
 
+    @Override
     public SchemaFieldDataType schemaFieldDataType() throws IllegalStateException {
         return Optional.ofNullable(schemaFieldDataType).orElseGet(() -> {
             final SchemaFieldDataType.Type fieldType;
@@ -206,7 +214,7 @@ public class ProtobufField implements ProtobufElement {
     }
 
     @Override
-    public String comment() {
+    public String description() {
         return messageLocations()
                 .filter(loc -> loc.getPathCount() > 3
                         && loc.getPath(2) == DescriptorProto.FIELD_FIELD_NUMBER
@@ -217,7 +225,10 @@ public class ProtobufField implements ProtobufElement {
     }
 
     @Override
-    public <T> Stream<T> accept(ProtobufModelVisitor<T> visitor, VisitContext context) {
+    public <T, G extends SchemaGraph<ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge>,
+            V extends SchemaVisitor<T, G, C, ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge>,
+            C extends SchemaContext<G, C, ProtobufElement, ProtobufMessage, ProtobufField, ProtobufEdge>>
+    Stream<T> accept(V visitor, C context) {
         return visitor.visitField(this, context);
     }
 

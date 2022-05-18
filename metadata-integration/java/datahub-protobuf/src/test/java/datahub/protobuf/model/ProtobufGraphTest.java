@@ -8,16 +8,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static datahub.protobuf.TestFixtures.getTestProtobufFileSet;
-import static datahub.protobuf.TestFixtures.getTestProtobufGraph;
+import static datahub.protobuf.TestFixtures.getFileSet;
+import static datahub.protobuf.TestFixtures.getGraph;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class ProtobufGraphTest {
 
     @Test
     public void autodetectRootMessageTest() throws IOException {
-        FileDescriptorSet fileset = getTestProtobufFileSet("protobuf", "messageB");
-        ProtobufGraph test = getTestProtobufGraph("protobuf", "messageB");
+        FileDescriptorSet fileset = getFileSet("protobuf", "messageB");
+        ProtobufGraph test = getGraph("protobuf", "messageB");
 
         assertEquals("MessageB", test.autodetectRootMessage(
                 fileset.getFileList().stream().filter(f -> f.getName().equals("protobuf/messageB.proto")).findFirst().get()).get().messageProto().getName());
@@ -28,14 +28,14 @@ public class ProtobufGraphTest {
 
     @Test
     public void autodetectRootMessageFailureTest() throws IOException {
-        FileDescriptorSet empty = getTestProtobufFileSet("protobuf", "messageEmpty");
+        FileDescriptorSet empty = getFileSet("protobuf", "messageEmpty");
         assertThrows(IllegalArgumentException.class, () -> new ProtobufGraph(empty));
     }
 
     @Test
     public void findMessageTest() throws IOException {
-        FileDescriptorSet fileset = getTestProtobufFileSet("protobuf", "messageB");
-        ProtobufGraph test = getTestProtobufGraph("protobuf", "messageB");
+        FileDescriptorSet fileset = getFileSet("protobuf", "messageB");
+        ProtobufGraph test = getGraph("protobuf", "messageB");
 
         assertEquals("MessageA",
                 test.findMessage("protobuf.MessageA").messageProto().getName());
@@ -49,15 +49,15 @@ public class ProtobufGraphTest {
 
     @Test
     public void commentTest() throws IOException {
-        ProtobufGraph test = getTestProtobufGraph("protobuf", "messageC");
+        ProtobufGraph test = getGraph("protobuf", "messageC");
         assertEquals("Test for one of", test.getComment());
     }
 
     @Test
     public void equalityHashCodeTest() throws IOException {
-        ProtobufGraph testA = getTestProtobufGraph("protobuf", "messageA");
-        ProtobufGraph testB = getTestProtobufGraph("protobuf", "messageB");
-        FileDescriptorSet filesetB = getTestProtobufFileSet("protobuf", "messageB");
+        ProtobufGraph testA = getGraph("protobuf", "messageA");
+        ProtobufGraph testB = getGraph("protobuf", "messageB");
+        FileDescriptorSet filesetB = getFileSet("protobuf", "messageB");
 
         assertEquals(testB, new ProtobufGraph(filesetB));
         assertNotEquals(testA, new ProtobufGraph(filesetB));
@@ -73,8 +73,8 @@ public class ProtobufGraphTest {
 
     @Test
     public void duplicateNestedTest() throws IOException {
-        FileDescriptorSet fileset = getTestProtobufFileSet("protobuf", "messageB");
-        ProtobufGraph test = getTestProtobufGraph("protobuf", "messageB");
+        FileDescriptorSet fileset = getFileSet("protobuf", "messageB");
+        ProtobufGraph test = getGraph("protobuf", "messageB");
 
         List<ProtobufElement> nestedMessages = test.vertexSet().stream().filter(f -> f.name().endsWith("nested"))
                 .collect(Collectors.toList());

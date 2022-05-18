@@ -43,7 +43,7 @@ public class ProtobufEnumTest {
         assertEquals(expectedFile, test.fileProto());
         assertEquals(new SchemaFieldDataType().setType(SchemaFieldDataType.Type.create(new EnumType())), test.schemaFieldDataType());
         assertEquals("ProtobufEnum[protobuf.enum1]", test.toString());
-        assertEquals("", test.comment());
+        assertEquals("", test.description());
     }
 
     @Test

@@ -1,0 +1,33 @@
+plugins {
+    id("com.palantir.git-version") apply false
+}
+apply plugin: 'java'
+apply plugin: 'jacoco'
+
+afterEvaluate {
+    if (project.plugins.hasPlugin('java')) {
+        sourceCompatibility = 11
+        targetCompatibility = 11
+    }
+}
+
+dependencies {
+    implementation project(':metadata-models')
+    implementation project(path: ':metadata-integration:java:datahub-client', configuration: 'shadow')
+
+    implementation externalDependency.jgrapht
+
+    compileOnly externalDependency.lombok
+    annotationProcessor externalDependency.lombok
+    testImplementation externalDependency.junitJupiterApi
+    testRuntimeOnly externalDependency.junitJupiterEngine
+}
+
+jacocoTestReport {
+    dependsOn test // tests are required to run before generating the report
+}
+
+test {
+    useJUnit()
+    finalizedBy jacocoTestReport
+}

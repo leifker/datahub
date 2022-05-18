@@ -5,9 +5,9 @@ import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.Descriptors;
 import com.linkedin.data.template.StringMap;
 import com.linkedin.dataset.DatasetProperties;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
+import datahub.protobuf.visitors.ProtobufVisitor;
 import datahub.protobuf.visitors.ProtobufExtensionUtil;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.protobuf.ProtobufContext;
 
 import java.util.Collection;
 import java.util.Map;
@@ -18,13 +18,13 @@ import static datahub.protobuf.ProtobufUtils.getMessageOptions;
 import static datahub.protobuf.visitors.ProtobufExtensionUtil.getProperties;
 
 
-public class PropertyVisitor implements ProtobufModelVisitor<DatasetProperties> {
+public class PropertyVisitor implements ProtobufVisitor<DatasetProperties> {
     private static final Gson GSON = new Gson();
 
     @Override
-    public Stream<DatasetProperties> visitGraph(VisitContext context) {
+    public Stream<DatasetProperties> visitGraph(ProtobufContext context) {
         Map<String, String> properties = ProtobufExtensionUtil.filterByDataHubType(getMessageOptions(context.root().messageProto()),
-                        context.getGraph().getRegistry(), ProtobufExtensionUtil.DataHubMetadataType.PROPERTY)
+                        context.graph().getRegistry(), ProtobufExtensionUtil.DataHubMetadataType.PROPERTY)
                 .stream().flatMap(fd -> {
                     if (fd.getKey().getJavaType() != Descriptors.FieldDescriptor.JavaType.MESSAGE) {
                         if (fd.getKey().isRepeated()) {

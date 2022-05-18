@@ -7,8 +7,8 @@ import org.junit.Test;
 
 import java.io.IOException;
 
-import static datahub.protobuf.TestFixtures.getTestProtobufFileSet;
-import static datahub.protobuf.TestFixtures.getTestProtoc;
+import static datahub.protobuf.TestFixtures.getFileSet;
+import static datahub.protobuf.TestFixtures.getProtoc;
 import static org.junit.jupiter.api.Assertions.*;
 
 
@@ -16,8 +16,8 @@ public class ProtobufUtilsTest {
 
     @Test
     public void registryTest() throws IOException, IllegalArgumentException {
-        byte[] protocBytes = getTestProtoc("extended_protobuf", "messageA").readAllBytes();
-        DescriptorProtos.FileDescriptorSet fileSet = getTestProtobufFileSet("extended_protobuf", "messageA");
+        byte[] protocBytes = getProtoc("extended_protobuf", "messageA").readAllBytes();
+        DescriptorProtos.FileDescriptorSet fileSet = getFileSet("extended_protobuf", "messageA");
         ExtensionRegistry registry = ProtobufUtils.buildRegistry(fileSet);
         DescriptorProtos.FileDescriptorSet fileSetWithRegistry = DescriptorProtos.FileDescriptorSet.parseFrom(protocBytes, registry);
 

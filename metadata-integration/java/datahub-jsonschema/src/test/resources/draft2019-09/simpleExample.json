@@ -1,0 +1,103 @@
+{
+  "$id" : "https://example.com/person.json",
+  "$schema" : "https://json-schema.org/draft/2019-09/schema",
+  "title" : "Person",
+  "type" : "object",
+  "description" : "A person entity. https://some/link",
+  "$comment" : "Owned by @myOrg/teama. See slack #test-slack",
+  "properties" : {
+    "firstName" : {
+      "type" : "string",
+      "description" : "The person's first name."
+    },
+    "lastName" : {
+      "type" : "string",
+      "description" : "The person's last name."
+    },
+    "age" : {
+      "description" : "Age in years which must be equal to or greater than zero.",
+      "type" : "integer",
+      "minimum" : 0
+    },
+    "birthday" : {
+      "type" : "string",
+      "description" : "The person's birthday as a string.",
+      "$comment" : "Prefer age field.",
+      "deprecated" : true
+    },
+    "has_children" : {
+      "type" : "boolean",
+      "description" : "Has children."
+    },
+    "children_count" : {
+      "description" : "Number of children",
+      "type" : "number",
+      "minimum" : 0
+    },
+    "children_ages" : {
+      "type" : "array",
+      "items" : {
+        "type" : "integer",
+        "minimum" : 0
+      }
+    },
+    "children_names" : {
+      "type" : "array",
+      "items" : {
+        "type" : "string",
+        "uniqueItems" : true
+      }
+    },
+    "employment_status" : {
+      "enum" : [ "not_eligible", "unemployed", "part-time", "full-time" ]
+    },
+    "address" : {
+      "type" : "object",
+      "description" : "See some link here https://json-schema.org",
+      "properties" : {
+        "street_address" : {
+          "type" : "string"
+        },
+        "city" : {
+          "type" : "string"
+        },
+        "state" : {
+          "type" : "string"
+        },
+        "country" : {
+          "type" : "string"
+        }
+      },
+      "required" : [ "country", "state" ]
+    },
+    "token" : {
+      "type" : "string",
+      "contentMediaType" : "application/jwt",
+      "contentSchema" : {
+        "type" : "array",
+        "minItems" : 2,
+        "items" : [ {
+          "const" : {
+            "typ" : "JWT",
+            "alg" : "HS256"
+          }
+        }, {
+          "type" : "object",
+          "required" : [ "iss", "exp" ],
+          "properties" : {
+            "iss" : {
+              "type" : "string"
+            },
+            "exp" : {
+              "type" : "integer"
+            }
+          }
+        } ]
+      }
+    }
+  },
+  "required" : [ "firstName", "lastName" ],
+  "deprecated" : true,
+  "readOnly" : true,
+  "writeOnly" : false
+}

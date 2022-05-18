@@ -5,7 +5,7 @@ import com.linkedin.common.OwnershipSource;
 import com.linkedin.common.OwnershipSourceType;
 import com.linkedin.common.OwnershipType;
 import com.linkedin.common.urn.Urn;
-import datahub.protobuf.model.ProtobufGraph;
+import datahub.protobuf.ProtobufContext;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -13,8 +13,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static datahub.protobuf.TestFixtures.getTestProtobufGraph;
-import static datahub.protobuf.TestFixtures.getVisitContextBuilder;
+import static datahub.protobuf.TestFixtures.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
@@ -22,7 +21,7 @@ public class OwnershipVisitorTest {
 
     @Test
     public void visitorTest() throws IOException {
-        ProtobufGraph graph = getTestProtobufGraph("extended_protobuf", "messageA");
+        ProtobufContext context = getContext("extended_protobuf", "messageA", "extended_protobuf.MessageA");
 
         OwnershipVisitor test = new OwnershipVisitor();
 
@@ -39,12 +38,12 @@ public class OwnershipVisitorTest {
                                 .setSource(new OwnershipSource().setType(OwnershipSourceType.MANUAL))
                                 .setOwner(Urn.createFromTuple("corpgroup", "technicalowner"))
                 ),
-                graph.accept(getVisitContextBuilder("extended_protobuf.MessageA"), List.of(test)).collect(Collectors.toSet()));
+                context.accept(List.of(test)).collect(Collectors.toSet()));
     }
 
     @Test
     public void visitorSingleOwnerTest() throws IOException {
-        ProtobufGraph graph = getTestProtobufGraph("extended_protobuf", "messageB");
+        ProtobufContext context = getContext("extended_protobuf", "messageB", "extended_protobuf.MessageB");
 
         OwnershipVisitor test = new OwnershipVisitor();
 
@@ -53,6 +52,6 @@ public class OwnershipVisitorTest {
                                 .setSource(new OwnershipSource().setType(OwnershipSourceType.MANUAL))
                                 .setOwner(Urn.createFromTuple("corpuser", "datahub"))
                 ),
-                graph.accept(getVisitContextBuilder("extended_protobuf.MessageB"), List.of(test)).collect(Collectors.toSet()));
+                context.accept(List.of(test)).collect(Collectors.toSet()));
     }
 }

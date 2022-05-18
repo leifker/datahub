@@ -1,10 +1,16 @@
-package datahub.protobuf.visitors.dataset;
+package datahub.integration.visitors;
+
 
 import com.linkedin.common.InstitutionalMemoryMetadata;
 import com.linkedin.common.url.Url;
-import datahub.protobuf.model.ProtobufField;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.integration.SchemaContext;
+import datahub.integration.SchemaVisitor;
+import datahub.integration.model.FieldNode;
+import datahub.integration.model.Node;
+import datahub.integration.model.SchemaEdge;
+import datahub.integration.model.SchemaGraph;
+import datahub.integration.model.SchemaNode;
+import org.apache.commons.lang.StringUtils;
 
 import javax.annotation.Nullable;
 import java.util.LinkedList;
@@ -19,12 +25,14 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-public class InstitutionalMemoryVisitor implements ProtobufModelVisitor<InstitutionalMemoryMetadata> {
+public class InstitutionalMemoryVisitor<G extends SchemaGraph<N, S, F, E>, C extends SchemaContext<G, C, N, S, F, E>,
+        N extends Node<N, S, F, E>, S extends SchemaNode<N, S, F, E>, F extends FieldNode<N, S, F, E>,
+        E extends SchemaEdge<N, S, F, E>>  implements SchemaVisitor<InstitutionalMemoryMetadata, G, C, N, S, F, E> {
     public static final String TEAM_DESC =  "Github Team";
     public static final String SLACK_CHAN_DESC = "Slack Channel";
 
-    private static final Pattern SLACK_CHANNEL_REGEX = Pattern.compile("(?si).*#([a-z0-9-]+).*");
-    private static final Pattern LINK_REGEX = Pattern.compile("(?s)(\\b(https?|ftp|file)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|])");
+    protected static final Pattern SLACK_CHANNEL_REGEX = Pattern.compile("(?si).*#([a-z0-9-]+).*");
+    protected static final Pattern LINK_REGEX = Pattern.compile("(?s)(\\b(https?|ftp|file)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|])");
     private final String githubOrganization;
     private final Pattern githubTeamRegex;
     private final String slackTeamId;
@@ -39,8 +47,59 @@ public class InstitutionalMemoryVisitor implements ProtobufModelVisitor<Institut
         }
     }
 
+    @Override
+    public Stream<InstitutionalMemoryMetadata> visitGraph(C context) {
+        List<InstitutionalMemoryMetadata> institutionalMemoryMetadata = new LinkedList<>();
+
+        teamLink(context.root().description()).ifPresent(url ->
+                institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
+                        .setCreateStamp(context.getAuditStamp())
+                        .setDescription(TEAM_DESC)
+                        .setUrl(url)));
+
+
+        slackLink(context.root().description()).ifPresent(url ->
+                institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
+                        .setCreateStamp(context.getAuditStamp())
+                        .setDescription(SLACK_CHAN_DESC)
+                        .setUrl(url)));
+
+        final int[] cnt = {0};
+        MatcherStream.findMatches(LINK_REGEX, context.root().description()).forEach(match -> {
+            cnt[0] += 1;
+            institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
+                    .setCreateStamp(context.getAuditStamp())
+                    .setDescription(String.format("%s Reference %d", StringUtils.capitalize(context.root().name()), cnt[0]))
+                    .setUrl(new Url(match.group(1))));
+        });
+
+        return institutionalMemoryMetadata.stream();
+    }
+
+    @Override
+    public Stream<InstitutionalMemoryMetadata> visitField(F field, C context) {
+        List<InstitutionalMemoryMetadata> institutionalMemoryMetadata = new LinkedList<>();
+
+        if (field.parentSchema().equals(context.graph().root())) {
+            final int[] cnt = {0};
+            MatcherStream.findMatches(LINK_REGEX, field.description()).forEach(match -> {
+                cnt[0] += 1;
+                String[] parentName = field.parentSchemaName().split("[.]");
+                institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
+                        .setCreateStamp(context.getAuditStamp())
+                        .setDescription(String.format("%s.%s Reference %d",
+                                        StringUtils.capitalize(parentName[parentName.length - 1]),
+                                field.name(),
+                                cnt[0]))
+                        .setUrl(new Url(match.group(1))));
+            });
+        }
+
+        return institutionalMemoryMetadata.stream();
+    }
+
     //  https://slack.com/app_redirect?channel=fdn-analytics-data-catalog&team=T024F4EL1
-    private Optional<Url> slackLink(String text) {
+    protected Optional<Url> slackLink(String text) {
         return Optional.ofNullable(slackTeamId).map(teamId -> {
             Matcher m = SLACK_CHANNEL_REGEX.matcher(text);
             if (m.matches()) {
@@ -51,7 +110,7 @@ public class InstitutionalMemoryVisitor implements ProtobufModelVisitor<Institut
         });
     }
 
-    private Optional<Url> teamLink(String text) {
+    protected Optional<Url> teamLink(String text) {
         return Optional.ofNullable(githubTeamRegex).map(regex -> {
             Matcher m = regex.matcher(text);
             if (m.matches()) {
@@ -60,56 +119,6 @@ public class InstitutionalMemoryVisitor implements ProtobufModelVisitor<Institut
                 return null;
             }
         });
-    }
-
-    @Override
-    public Stream<InstitutionalMemoryMetadata> visitGraph(VisitContext context) {
-        List<InstitutionalMemoryMetadata> institutionalMemoryMetadata = new LinkedList<>();
-
-        teamLink(context.root().comment()).ifPresent(url ->
-                institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
-                        .setCreateStamp(context.getAuditStamp())
-                        .setDescription(TEAM_DESC)
-                        .setUrl(url)));
-
-
-        slackLink(context.root().comment()).ifPresent(url ->
-                institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
-                        .setCreateStamp(context.getAuditStamp())
-                        .setDescription(SLACK_CHAN_DESC)
-                        .setUrl(url)));
-
-        final int[] cnt = {0};
-        MatcherStream.findMatches(LINK_REGEX, context.root().comment()).forEach(match -> {
-            cnt[0] += 1;
-            institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
-                    .setCreateStamp(context.getAuditStamp())
-                    .setDescription(String.format("%s Reference %d", context.root().name(), cnt[0]))
-                    .setUrl(new Url(match.group(1))));
-        });
-
-        return institutionalMemoryMetadata.stream();
-    }
-
-    @Override
-    public Stream<InstitutionalMemoryMetadata> visitField(ProtobufField field, VisitContext context) {
-        List<InstitutionalMemoryMetadata> institutionalMemoryMetadata = new LinkedList<>();
-
-        if (field.messageProto().equals(context.getGraph().root().messageProto())) {
-            final int[] cnt = {0};
-            MatcherStream.findMatches(LINK_REGEX, field.comment()).forEach(match -> {
-                cnt[0] += 1;
-                institutionalMemoryMetadata.add(new InstitutionalMemoryMetadata()
-                        .setCreateStamp(context.getAuditStamp())
-                        .setDescription(String.format("%s.%s Reference %d",
-                                field.getProtobufMessage().name(),
-                                field.getFieldProto().getName(),
-                                cnt[0]))
-                        .setUrl(new Url(match.group(1))));
-            });
-        }
-
-        return institutionalMemoryMetadata.stream();
     }
 
     private static class MatcherStream {

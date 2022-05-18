@@ -21,7 +21,12 @@ public class ProtobufEnum extends ProtobufMessage {
     public ProtobufEnum(FileDescriptorProto fileProto,
                         DescriptorProto messageProto,
                         EnumDescriptorProto enumProto) {
-        super(messageProto, null, fileProto);
+
+        super(ProtobufMessage.builder()
+                .fileProto(fileProto)
+                .parentMessageProto(null)
+                .messageProto(messageProto)
+        );
         this.enumProto = enumProto;
     }
 
@@ -46,7 +51,7 @@ public class ProtobufEnum extends ProtobufMessage {
     }
 
     @Override
-    public String comment() {
+    public String description() {
         return messageLocations()
                 .filter(loc -> loc.getPathCount() > 3
                         && loc.getPath(2) == DescriptorProto.ENUM_TYPE_FIELD_NUMBER

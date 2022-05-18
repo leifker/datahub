@@ -1,6 +1,6 @@
 package datahub.protobuf.visitors.dataset;
 
-import datahub.protobuf.model.ProtobufGraph;
+import datahub.protobuf.ProtobufContext;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -16,11 +16,11 @@ public class DescriptionVisitorTest {
 
     @Test
     public void visitorTest() throws IOException {
-        ProtobufGraph graph = getTestProtobufGraph("protobuf", "messageB");
+        ProtobufContext context = getContext("protobuf", "messageB", "protobuf.MessageB");
 
         DescriptionVisitor test = new DescriptionVisitor();
 
         assertEquals(Set.of("This contains nested types.\n\nOwned by TeamB"),
-                graph.accept(getVisitContextBuilder("protobuf.MessageB"), List.of(test)).collect(Collectors.toSet()));
+                context.accept(List.of(test)).collect(Collectors.toSet()));
     }
 }

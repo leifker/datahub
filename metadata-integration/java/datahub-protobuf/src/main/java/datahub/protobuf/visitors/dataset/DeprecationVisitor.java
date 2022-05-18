@@ -4,8 +4,8 @@ import com.google.protobuf.Descriptors;
 import com.linkedin.common.Deprecation;
 import com.linkedin.util.Pair;
 import datahub.protobuf.visitors.ProtobufExtensionUtil;
-import datahub.protobuf.visitors.ProtobufModelVisitor;
-import datahub.protobuf.visitors.VisitContext;
+import datahub.protobuf.visitors.ProtobufVisitor;
+import datahub.protobuf.ProtobufContext;
 
 import java.util.Collection;
 import java.util.List;
@@ -15,14 +15,14 @@ import java.util.stream.Stream;
 
 import static datahub.protobuf.ProtobufUtils.getMessageOptions;
 
-public class DeprecationVisitor implements ProtobufModelVisitor<Deprecation> {
+public class DeprecationVisitor implements ProtobufVisitor<Deprecation> {
 
     @Override
-    public Stream<Deprecation> visitGraph(VisitContext context) {
+    public Stream<Deprecation> visitGraph(ProtobufContext context) {
         if (context.root().messageProto().getOptions().getDeprecated()) {
             List<Pair<Descriptors.FieldDescriptor, Object>> deprecationOptions = ProtobufExtensionUtil
                     .filterByDataHubType(getMessageOptions(context.root().messageProto()),
-                            context.getGraph().getRegistry(), ProtobufExtensionUtil.DataHubMetadataType.DEPRECATION);
+                            context.graph().getRegistry(), ProtobufExtensionUtil.DataHubMetadataType.DEPRECATION);
 
             String decommissionNote = deprecationOptions.stream()
                     .filter(opt -> opt.getKey().getJavaType() == Descriptors.FieldDescriptor.JavaType.STRING)
