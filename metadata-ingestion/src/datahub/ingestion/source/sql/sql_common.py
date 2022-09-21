@@ -17,13 +17,13 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast,
 )
 from urllib.parse import quote_plus
 
 import pydantic
+import sqlalchemy.dialects.postgresql.base
 from pydantic.fields import Field
-from sqlalchemy import create_engine, dialects, inspect
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.sql import sqltypes as types
@@ -34,6 +34,7 @@ from datahub.emitter.mce_builder import (
     make_dataplatform_instance_urn,
     make_dataset_urn_with_platform_instance,
     make_domain_urn,
+    make_tag_urn,
 )
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.mcp_builder import (
@@ -46,15 +47,17 @@ from datahub.emitter.mcp_builder import (
 )
 from datahub.ingestion.api.common import PipelineContext
 from datahub.ingestion.api.workunit import MetadataWorkUnit
-from datahub.ingestion.source.state.checkpoint import Checkpoint
+from datahub.ingestion.source.ge_profiling_config import GEProfilingConfig
 from datahub.ingestion.source.state.sql_common_state import (
     BaseSQLAlchemyCheckpointState,
 )
+from datahub.ingestion.source.state.stale_entity_removal_handler import (
+    StaleEntityRemovalHandler,
+    StaleEntityRemovalSourceReport,
+    StatefulStaleMetadataRemovalConfig,
+)
 from datahub.ingestion.source.state.stateful_ingestion_base import (
-    JobId,
-    StatefulIngestionConfig,
     StatefulIngestionConfigBase,
-    StatefulIngestionReport,
     StatefulIngestionSourceBase,
 )
 from datahub.metadata.com.linkedin.pegasus2avro.common import StatusClass
@@ -83,12 +86,14 @@ from datahub.metadata.schema_classes import (
     DataPlatformInstanceClass,
     DatasetLineageTypeClass,
     DatasetPropertiesClass,
-    JobStatusClass,
+    GlobalTagsClass,
     SubTypesClass,
+    TagAssociationClass,
     UpstreamClass,
     ViewPropertiesClass,
 )
 from datahub.telemetry import telemetry
+from datahub.utilities.registries.domain_registry import DomainRegistry
 from datahub.utilities.sqlalchemy_query_combiner import SQLAlchemyQueryCombinerReport
 
 if TYPE_CHECKING:
@@ -98,6 +103,8 @@ if TYPE_CHECKING:
     )
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+MISSING_COLUMN_INFO = "missing column information"
 
 
 def _platform_alchemy_uri_tester_gen(
@@ -114,6 +121,7 @@ PLATFORM_TO_SQLALCHEMY_URI_TESTER_MAP: Dict[str, Callable[[str], bool]] = Ordere
         _platform_alchemy_uri_tester_gen("bigquery"),
         _platform_alchemy_uri_tester_gen("clickhouse"),
         _platform_alchemy_uri_tester_gen("druid"),
+        _platform_alchemy_uri_tester_gen("hana"),
         _platform_alchemy_uri_tester_gen("hive"),
         _platform_alchemy_uri_tester_gen("mongodb"),
         _platform_alchemy_uri_tester_gen("mssql"),
@@ -133,16 +141,15 @@ PLATFORM_TO_SQLALCHEMY_URI_TESTER_MAP: Dict[str, Callable[[str], bool]] = Ordere
         _platform_alchemy_uri_tester_gen("postgres", "postgresql"),
         _platform_alchemy_uri_tester_gen("snowflake"),
         _platform_alchemy_uri_tester_gen("trino"),
+        _platform_alchemy_uri_tester_gen("vertica"),
     ]
 )
 
 
 def get_platform_from_sqlalchemy_uri(sqlalchemy_uri: str) -> str:
-
     for platform, tester in PLATFORM_TO_SQLALCHEMY_URI_TESTER_MAP.items():
         if tester(sqlalchemy_uri):
             return platform
-
     return "external"
 
 
@@ -180,12 +187,11 @@ class SqlContainerSubTypes(str, Enum):
 
 
 @dataclass
-class SQLSourceReport(StatefulIngestionReport):
+class SQLSourceReport(StaleEntityRemovalSourceReport):
     tables_scanned: int = 0
     views_scanned: int = 0
     entities_profiled: int = 0
     filtered: List[str] = field(default_factory=list)
-    soft_deleted_stale_entities: List[str] = field(default_factory=list)
 
     query_combiner: Optional[SQLAlchemyQueryCombinerReport] = None
 
@@ -211,20 +217,16 @@ class SQLSourceReport(StatefulIngestionReport):
     ) -> None:
         self.query_combiner = query_combiner_report
 
-    def report_stale_entity_soft_deleted(self, urn: str) -> None:
-        self.soft_deleted_stale_entities.append(urn)
 
-
-class SQLAlchemyStatefulIngestionConfig(StatefulIngestionConfig):
+class SQLAlchemyStatefulIngestionConfig(StatefulStaleMetadataRemovalConfig):
     """
-    Specialization of basic StatefulIngestionConfig to adding custom config.
+    Specialization of StatefulStaleMetadataRemovalConfig to adding custom config.
     This will be used to override the stateful_ingestion config param of StatefulIngestionConfigBase
     in the SQLAlchemyConfig.
     """
 
-    remove_stale_metadata: bool = Field(
-        default=True,
-        description="Soft-deletes the tables and views that were found in the last successful run but missing in the current run with stateful_ingestion enabled.",
+    _entity_types: List[str] = pydantic.Field(
+        default=["assertion", "container", "table", "view"]
     )
 
 
@@ -236,23 +238,23 @@ class SQLAlchemyConfig(StatefulIngestionConfigBase):
     # them out afterwards via the table_pattern.
     schema_pattern: AllowDenyPattern = Field(
         default=AllowDenyPattern.allow_all(),
-        description="regex patterns for schemas to filter in ingestion.",
+        description="Regex patterns for schemas to filter in ingestion. Specify regex to only match the schema name. e.g. to match all tables in schema analytics, use the regex 'analytics'",
     )
     table_pattern: AllowDenyPattern = Field(
         default=AllowDenyPattern.allow_all(),
-        description="regex patterns for tables to filter in ingestion.",
+        description="Regex patterns for tables to filter in ingestion. Specify regex to match the entire table name in database.schema.table format. e.g. to match all tables starting with customer in Customer database and public schema, use the regex 'Customer.public.customer.*'",
     )
     view_pattern: AllowDenyPattern = Field(
         default=AllowDenyPattern.allow_all(),
-        description="regex patterns for views to filter in ingestion.",
+        description="Regex patterns for views to filter in ingestion. Note: Defaults to table_pattern if not specified. Specify regex to match the entire view name in database.schema.view format. e.g. to match all views starting with customer in Customer database and public schema, use the regex 'Customer.public.customer.*'",
     )
     profile_pattern: AllowDenyPattern = Field(
         default=AllowDenyPattern.allow_all(),
-        description="regex patterns for profiles to filter in ingestion, allowed by the `table_pattern`.",
+        description="Regex patterns to filter tables for profiling during ingestion. Allowed by the `table_pattern`.",
     )
     domain: Dict[str, AllowDenyPattern] = Field(
         default=dict(),
-        description=' regex patterns for tables/schemas to descide domain_key domain key (domain_key can be any string like "sales".) There can be multiple domain key specified.',
+        description='Attach domains to databases, schemas or tables during ingestion using regex patterns. Domain key can be a guid like *urn:li:domain:ec428203-ce86-4db3-985d-5a8ee6df32ba* or a string like "Marketing".) If you provide strings, then datahub will attempt to resolve this name to a guid, and will error out if this fails. There can be multiple domain keys specified.',
     )
 
     include_views: Optional[bool] = Field(
@@ -262,19 +264,28 @@ class SQLAlchemyConfig(StatefulIngestionConfigBase):
         default=True, description="Whether tables should be ingested."
     )
 
-    from datahub.ingestion.source.ge_data_profiler import GEProfilingConfig
-
     profiling: GEProfilingConfig = GEProfilingConfig()
     # Custom Stateful Ingestion settings
     stateful_ingestion: Optional[SQLAlchemyStatefulIngestionConfig] = None
+
+    @pydantic.root_validator(pre=True)
+    def view_pattern_is_table_pattern_unless_specified(
+        cls, values: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        view_pattern = values.get("view_pattern")
+        table_pattern = values.get("table_pattern")
+        if table_pattern and not view_pattern:
+            logger.info(f"Applying table_pattern {table_pattern} to view_pattern.")
+            values["view_pattern"] = table_pattern
+        return values
 
     @pydantic.root_validator()
     def ensure_profiling_pattern_is_passed_to_profiling(
         cls, values: Dict[str, Any]
     ) -> Dict[str, Any]:
-        profiling = values.get("profiling")
+        profiling: Optional[GEProfilingConfig] = values.get("profiling")
         if profiling is not None and profiling.enabled:
-            profiling.allow_deny_patterns = values["profile_pattern"]
+            profiling._allow_deny_patterns = values["profile_pattern"]
         return values
 
     @abstractmethod
@@ -284,7 +295,9 @@ class SQLAlchemyConfig(StatefulIngestionConfigBase):
 
 class BasicSQLAlchemyConfig(SQLAlchemyConfig):
     username: Optional[str] = Field(default=None, description="username")
-    password: Optional[pydantic.SecretStr] = Field(default=None, description="password")
+    password: Optional[pydantic.SecretStr] = Field(
+        default=None, exclude=True, description="password"
+    )
     host_port: str = Field(description="host URL")
     database: Optional[str] = Field(default=None, description="database (catalog)")
     database_alias: Optional[str] = Field(
@@ -303,7 +316,7 @@ class BasicSQLAlchemyConfig(SQLAlchemyConfig):
         return self.sqlalchemy_uri or make_sqlalchemy_uri(
             self.scheme,  # type: ignore
             self.username,
-            self.password.get_secret_value() if self.password else None,
+            self.password.get_secret_value() if self.password is not None else None,
             self.host_port,  # type: ignore
             self.database,
             uri_opts=uri_opts,
@@ -331,20 +344,23 @@ _field_type_mapping: Dict[Type[types.TypeEngine], Type] = {
     types.DATETIME: TimeTypeClass,
     types.TIMESTAMP: TimeTypeClass,
     types.JSON: RecordTypeClass,
-    dialects.postgresql.base.BYTEA: BytesTypeClass,
-    dialects.postgresql.base.DOUBLE_PRECISION: NumberTypeClass,
-    dialects.postgresql.base.INET: StringTypeClass,
-    dialects.postgresql.base.MACADDR: StringTypeClass,
-    dialects.postgresql.base.MONEY: NumberTypeClass,
-    dialects.postgresql.base.OID: StringTypeClass,
-    dialects.postgresql.base.REGCLASS: BytesTypeClass,
-    dialects.postgresql.base.TIMESTAMP: TimeTypeClass,
-    dialects.postgresql.base.TIME: TimeTypeClass,
-    dialects.postgresql.base.INTERVAL: TimeTypeClass,
-    dialects.postgresql.base.BIT: BytesTypeClass,
-    dialects.postgresql.base.UUID: StringTypeClass,
-    dialects.postgresql.base.TSVECTOR: BytesTypeClass,
-    dialects.postgresql.base.ENUM: EnumTypeClass,
+    # Because the postgresql dialect is used internally by many other dialects,
+    # we add some postgres types here. This is ok to do because the postgresql
+    # dialect is built-in to sqlalchemy.
+    sqlalchemy.dialects.postgresql.base.BYTEA: BytesTypeClass,
+    sqlalchemy.dialects.postgresql.base.DOUBLE_PRECISION: NumberTypeClass,
+    sqlalchemy.dialects.postgresql.base.INET: StringTypeClass,
+    sqlalchemy.dialects.postgresql.base.MACADDR: StringTypeClass,
+    sqlalchemy.dialects.postgresql.base.MONEY: NumberTypeClass,
+    sqlalchemy.dialects.postgresql.base.OID: StringTypeClass,
+    sqlalchemy.dialects.postgresql.base.REGCLASS: BytesTypeClass,
+    sqlalchemy.dialects.postgresql.base.TIMESTAMP: TimeTypeClass,
+    sqlalchemy.dialects.postgresql.base.TIME: TimeTypeClass,
+    sqlalchemy.dialects.postgresql.base.INTERVAL: TimeTypeClass,
+    sqlalchemy.dialects.postgresql.base.BIT: BytesTypeClass,
+    sqlalchemy.dialects.postgresql.base.UUID: StringTypeClass,
+    sqlalchemy.dialects.postgresql.base.TSVECTOR: BytesTypeClass,
+    sqlalchemy.dialects.postgresql.base.ENUM: EnumTypeClass,
     # When SQLAlchemy is unable to map a type into its internal hierarchy, it
     # assigns the NullType by default. We want to carry this warning through.
     types.NullType: NullTypeClass,
@@ -465,6 +481,15 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         self.platform = platform
         self.report: SQLSourceReport = SQLSourceReport()
 
+        # Create and register the stateful ingestion use-case handlers.
+        self.stale_entity_removal_handler = StaleEntityRemovalHandler(
+            source=self,
+            config=self.config,
+            state_type_class=BaseSQLAlchemyCheckpointState,
+            pipeline_name=self.ctx.pipeline_name,
+            run_id=self.ctx.run_id,
+        )
+
         config_report = {
             config_option: config.dict().get(config_option)
             for config_option in config_options_to_report
@@ -489,6 +514,10 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                     config_flag: config.profiling.dict().get(config_flag)
                     for config_flag in profiling_flags_to_report
                 },
+            )
+        if self.config.domain:
+            self.domain_registry = DomainRegistry(
+                cached_domains=[k for k in self.config.domain], graph=self.ctx.graph
             )
 
     def warn(self, log: logging.Logger, key: str, reason: str) -> None:
@@ -518,52 +547,6 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         else:
             raise Exception("Unable to get database name from Sqlalchemy inspector")
 
-    def is_checkpointing_enabled(self, job_id: JobId) -> bool:
-        if (
-            job_id == self.get_default_ingestion_job_id()
-            and self.is_stateful_ingestion_configured()
-            and self.config.stateful_ingestion
-            and self.config.stateful_ingestion.remove_stale_metadata
-        ):
-            return True
-
-        return False
-
-    def get_default_ingestion_job_id(self) -> JobId:
-        """
-        Default ingestion job name that sql_common provides.
-        Subclasses can override as needed.
-        """
-        return JobId("common_ingest_from_sql_source")
-
-    def create_checkpoint(self, job_id: JobId) -> Optional[Checkpoint]:
-        """
-        Create the custom checkpoint with empty state for the job.
-        """
-        assert self.ctx.pipeline_name is not None
-        if job_id == self.get_default_ingestion_job_id():
-            return Checkpoint(
-                job_name=job_id,
-                pipeline_name=self.ctx.pipeline_name,
-                platform_instance_id=self.get_platform_instance_id(),
-                run_id=self.ctx.run_id,
-                config=self.config,
-                state=BaseSQLAlchemyCheckpointState(),
-            )
-        return None
-
-    def update_default_job_run_summary(self) -> None:
-        summary = self.get_job_run_summary(self.get_default_ingestion_job_id())
-        if summary is not None:
-            # For now just add the config and the report.
-            summary.config = self.config.json()
-            summary.custom_summary = self.report.as_string()
-            summary.runStatus = (
-                JobStatusClass.FAILED
-                if self.get_report().failures
-                else JobStatusClass.COMPLETED
-            )
-
     def get_schema_names(self, inspector):
         return inspector.get_schema_names()
 
@@ -576,64 +559,6 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         host_port = config_dict.get("host_port", "no_host_port")
         database = config_dict.get("database", "no_database")
         return f"{self.platform}_{host_port}_{database}"
-
-    def gen_removed_entity_workunits(self) -> Iterable[MetadataWorkUnit]:
-        last_checkpoint = self.get_last_checkpoint(
-            self.get_default_ingestion_job_id(), BaseSQLAlchemyCheckpointState
-        )
-        cur_checkpoint = self.get_current_checkpoint(
-            self.get_default_ingestion_job_id()
-        )
-        if (
-            self.config.stateful_ingestion
-            and self.config.stateful_ingestion.remove_stale_metadata
-            and last_checkpoint is not None
-            and last_checkpoint.state is not None
-            and cur_checkpoint is not None
-            and cur_checkpoint.state is not None
-        ):
-            logger.debug("Checking for stale entity removal.")
-
-            def soft_delete_item(urn: str, type: str) -> Iterable[MetadataWorkUnit]:
-                entity_type: str = "dataset"
-
-                if type == "container":
-                    entity_type = "container"
-
-                logger.info(f"Soft-deleting stale entity of type {type} - {urn}.")
-                mcp = MetadataChangeProposalWrapper(
-                    entityType=entity_type,
-                    entityUrn=urn,
-                    changeType=ChangeTypeClass.UPSERT,
-                    aspectName="status",
-                    aspect=StatusClass(removed=True),
-                )
-                wu = MetadataWorkUnit(id=f"soft-delete-{type}-{urn}", mcp=mcp)
-                self.report.report_workunit(wu)
-                self.report.report_stale_entity_soft_deleted(urn)
-                yield wu
-
-            last_checkpoint_state = cast(
-                BaseSQLAlchemyCheckpointState, last_checkpoint.state
-            )
-            cur_checkpoint_state = cast(
-                BaseSQLAlchemyCheckpointState, cur_checkpoint.state
-            )
-
-            for table_urn in last_checkpoint_state.get_table_urns_not_in(
-                cur_checkpoint_state
-            ):
-                yield from soft_delete_item(table_urn, "table")
-
-            for view_urn in last_checkpoint_state.get_view_urns_not_in(
-                cur_checkpoint_state
-            ):
-                yield from soft_delete_item(view_urn, "view")
-
-            for container_urn in last_checkpoint_state.get_container_urns_not_in(
-                cur_checkpoint_state
-            ):
-                yield from soft_delete_item(container_urn, "container")
 
     def gen_schema_key(self, db_name: str, schema: str) -> PlatformKey:
         return SchemaKey(
@@ -689,6 +614,16 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             self.report.report_workunit(wu)
             yield wu
 
+    def get_allowed_schemas(self, inspector: Inspector, db_name: str) -> Iterable[str]:
+        # this function returns the schema names which are filtered by schema_pattern.
+        for schema in self.get_schema_names(inspector):
+            if not self.config.schema_pattern.allowed(schema):
+                self.report.report_dropped(f"{schema}.*")
+                continue
+            else:
+                self.add_information_for_schema(inspector, schema)
+                yield schema
+
     def get_workunits(self) -> Iterable[Union[MetadataWorkUnit, SqlWorkUnit]]:
         sql_config = self.config
         if logger.isEnabledFor(logging.DEBUG):
@@ -706,15 +641,13 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             profiler = None
             profile_requests: List["GEProfilerRequest"] = []
             if sql_config.profiling.enabled:
-                profiler = self._get_profiler_instance(inspector)
+                profiler = self.get_profiler_instance(inspector)
 
             db_name = self.get_db_name(inspector)
             yield from self.gen_database_containers(db_name)
 
-            for schema in self.get_schema_names(inspector):
-                if not sql_config.schema_pattern.allowed(schema):
-                    self.report.report_dropped(f"{schema}.*")
-                    continue
+            for schema in self.get_allowed_schemas(inspector, db_name):
+                self.add_information_for_schema(inspector, schema)
 
                 yield from self.gen_schema_containers(schema, db_name)
 
@@ -730,11 +663,12 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                     )
 
             if profiler and profile_requests:
-                yield from self.loop_profiler(profile_requests, profiler)
+                yield from self.loop_profiler(
+                    profile_requests, profiler, platform=self.platform
+                )
 
-        if self.is_stateful_ingestion_configured():
-            # Clean up stale entities.
-            yield from self.gen_removed_entity_workunits()
+        # Clean up stale entities.
+        yield from self.stale_entity_removal_handler.gen_removed_entity_workunits()
 
     def standardize_schema_table_names(
         self, schema: str, entity: str
@@ -747,7 +681,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         self, *, schema: str, entity: str, inspector: Inspector, **kwargs: Any
     ) -> str:
         # Many SQLAlchemy dialects have three-level hierarchies. This method, which
-        # subclasses can override, enables them to modify the identifers as needed.
+        # subclasses can override, enables them to modify the identifiers as needed.
         if hasattr(self.config, "get_identifier"):
             # This path is deprecated and will eventually be removed.
             return self.config.get_identifier(schema=schema, table=entity)  # type: ignore
@@ -799,7 +733,9 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
 
         for domain, pattern in self.config.domain.items():
             if pattern.allowed(dataset_name):
-                domain_urn = make_domain_urn(domain)
+                domain_urn = make_domain_urn(
+                    self.domain_registry.get_domain_urn(domain)
+                )
 
         return domain_urn
 
@@ -809,7 +745,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         entity_urn: str,
         entity_type: str,
         sql_config: SQLAlchemyConfig,
-    ) -> Iterable[Union[MetadataWorkUnit]]:
+    ) -> Iterable[MetadataWorkUnit]:
 
         domain_urn = self._gen_domain_urn(dataset_name)
         if domain_urn:
@@ -847,7 +783,6 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                     continue
 
                 self.report.report_entity_scanned(dataset_name, ent_type="table")
-
                 if not sql_config.table_pattern.allowed(dataset_name):
                     self.report.report_dropped(dataset_name)
                     continue
@@ -865,6 +800,14 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                     )
         except Exception as e:
             self.report.report_failure(f"{schema}", f"Tables error: {e}")
+
+    def add_information_for_schema(self, inspector: Inspector, schema: str) -> None:
+        pass
+
+    def get_extra_tags(
+        self, inspector: Inspector, schema: str, table: str
+    ) -> Optional[Dict[str, List[str]]]:
+        return None
 
     def _process_table(
         self,
@@ -885,21 +828,24 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             urn=dataset_urn,
             aspects=[StatusClass(removed=False)],
         )
-        if self.is_stateful_ingestion_configured():
-            cur_checkpoint = self.get_current_checkpoint(
-                self.get_default_ingestion_job_id()
-            )
-            if cur_checkpoint is not None:
-                checkpoint_state = cast(
-                    BaseSQLAlchemyCheckpointState, cur_checkpoint.state
-                )
-                checkpoint_state.add_table_urn(dataset_urn)
-
+        # Add table to the checkpoint state
+        self.stale_entity_removal_handler.add_entity_to_state("table", dataset_urn)
         description, properties, location_urn = self.get_table_properties(
             inspector, schema, table
         )
+
+        # Tablename might be different from the real table if we ran some normalisation ont it.
+        # Getting normalized table name from the dataset_name
+        # Table is the last item in the dataset name
+        normalised_table = table
+        splits = dataset_name.split(".")
+        if splits:
+            normalised_table = splits[-1]
+            if properties and normalised_table != table:
+                properties["original_table_name"] = table
+
         dataset_properties = DatasetPropertiesClass(
-            name=table,
+            name=normalised_table,
             description=description,
             customProperties=properties,
         )
@@ -924,9 +870,12 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             self.report.report_workunit(lineage_wu)
             yield lineage_wu
 
+        extra_tags = self.get_extra_tags(inspector, schema, table)
         pk_constraints: dict = inspector.get_pk_constraint(table, schema)
         foreign_keys = self._get_foreign_keys(dataset_urn, inspector, schema, table)
-        schema_fields = self.get_schema_fields(dataset_name, columns, pk_constraints)
+        schema_fields = self.get_schema_fields(
+            dataset_name, columns, pk_constraints, tags=extra_tags
+        )
         schema_metadata = get_schema_metadata(
             self.report,
             dataset_name,
@@ -968,29 +917,35 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
 
     def get_table_properties(
         self, inspector: Inspector, schema: str, table: str
-    ) -> Tuple[Optional[str], Optional[Dict[str, str]], Optional[str]]:
+    ) -> Tuple[Optional[str], Dict[str, str], Optional[str]]:
+        description: Optional[str] = None
+        properties: Dict[str, str] = {}
+
+        # The location cannot be fetched generically, but subclasses may override
+        # this method and provide a location.
+        location: Optional[str] = None
+
         try:
-            location: Optional[str] = None
-            # SQLALchemy stubs are incomplete and missing this method.
+            # SQLAlchemy stubs are incomplete and missing this method.
             # PR: https://github.com/dropbox/sqlalchemy-stubs/pull/223.
             table_info: dict = inspector.get_table_comment(table, schema)  # type: ignore
         except NotImplementedError:
-            description: Optional[str] = None
-            properties: Dict[str, str] = {}
+            return description, properties, location
         except ProgrammingError as pe:
             # Snowflake needs schema names quoted when fetching table comments.
             logger.debug(
                 f"Encountered ProgrammingError. Retrying with quoted schema name for schema {schema} and table {table}",
                 pe,
             )
-            description = None
-            properties = {}
             table_info: dict = inspector.get_table_comment(table, f'"{schema}"')  # type: ignore
-        else:
-            description = table_info["text"]
 
-            # The "properties" field is a non-standard addition to SQLAlchemy's interface.
-            properties = table_info.get("properties", {})
+        description = table_info.get("text")
+        if type(description) is tuple:
+            # Handling for value type tuple which is coming for dialect 'db2+ibm_db'
+            description = table_info["text"][0]
+
+        # The "properties" field is a non-standard addition to SQLAlchemy's interface.
+        properties = table_info.get("properties", {})
         return description, properties, location
 
     def get_dataplatform_instance_aspect(
@@ -1023,7 +978,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         try:
             columns = inspector.get_columns(table, schema)
             if len(columns) == 0:
-                self.report.report_warning(dataset_name, "missing column information")
+                self.report.report_warning(MISSING_COLUMN_INFO, dataset_name)
         except Exception as e:
             self.report.report_warning(
                 dataset_name,
@@ -1048,19 +1003,35 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         return foreign_keys
 
     def get_schema_fields(
-        self, dataset_name: str, columns: List[dict], pk_constraints: dict = None
+        self,
+        dataset_name: str,
+        columns: List[dict],
+        pk_constraints: dict = None,
+        tags: Optional[Dict[str, List[str]]] = None,
     ) -> List[SchemaField]:
         canonical_schema = []
         for column in columns:
+            column_tags: Optional[List[str]] = None
+            if tags:
+                column_tags = tags.get(column["name"], [])
             fields = self.get_schema_fields_for_column(
-                dataset_name, column, pk_constraints
+                dataset_name, column, pk_constraints, tags=column_tags
             )
             canonical_schema.extend(fields)
         return canonical_schema
 
     def get_schema_fields_for_column(
-        self, dataset_name: str, column: dict, pk_constraints: dict = None
+        self,
+        dataset_name: str,
+        column: dict,
+        pk_constraints: dict = None,
+        tags: Optional[List[str]] = None,
     ) -> List[SchemaField]:
+        gtc: Optional[GlobalTagsClass] = None
+        if tags:
+            tags_str = [make_tag_urn(t) for t in tags]
+            tags_tac = [TagAssociationClass(t) for t in tags_str]
+            gtc = GlobalTagsClass(tags_tac)
         field = SchemaField(
             fieldPath=column["name"],
             type=get_column_type(self.report, dataset_name, column["type"]),
@@ -1068,6 +1039,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             description=column.get("comment", None),
             nullable=column["nullable"],
             recursive=False,
+            globalTags=gtc,
         )
         if (
             pk_constraints is not None
@@ -1142,18 +1114,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 columns,
                 canonical_schema=schema_fields,
             )
-        try:
-            # SQLALchemy stubs are incomplete and missing this method.
-            # PR: https://github.com/dropbox/sqlalchemy-stubs/pull/223.
-            view_info: dict = inspector.get_table_comment(view, schema)  # type: ignore
-        except NotImplementedError:
-            description: Optional[str] = None
-            properties: Dict[str, str] = {}
-        else:
-            description = view_info["text"]
-
-            # The "properties" field is a non-standard addition to SQLAlchemy's interface.
-            properties = view_info.get("properties", {})
+        description, properties, _ = self.get_table_properties(inspector, schema, view)
         try:
             view_definition = inspector.get_view_definition(view, schema)
             if view_definition is None:
@@ -1178,15 +1139,10 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         )
         db_name = self.get_db_name(inspector)
         yield from self.add_table_to_schema_container(dataset_urn, db_name, schema)
-        if self.is_stateful_ingestion_configured():
-            cur_checkpoint = self.get_current_checkpoint(
-                self.get_default_ingestion_job_id()
-            )
-            if cur_checkpoint is not None:
-                checkpoint_state = cast(
-                    BaseSQLAlchemyCheckpointState, cur_checkpoint.state
-                )
-                checkpoint_state.add_view_urn(dataset_urn)
+
+        # Add view to the checkpoint state
+        self.stale_entity_removal_handler.add_entity_to_state("view", dataset_urn)
+
         dataset_properties = DatasetPropertiesClass(
             name=view,
             description=description,
@@ -1219,16 +1175,10 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             view_properties_aspect = ViewPropertiesClass(
                 materialized=False, viewLanguage="SQL", viewLogic=view_definition_string
             )
-            view_properties_wu = MetadataWorkUnit(
-                id=f"{view}-viewProperties",
-                mcp=MetadataChangeProposalWrapper(
-                    entityType="dataset",
-                    changeType=ChangeTypeClass.UPSERT,
-                    entityUrn=dataset_urn,
-                    aspectName="viewProperties",
-                    aspect=view_properties_aspect,
-                ),
-            )
+            view_properties_wu = MetadataChangeProposalWrapper(
+                entityUrn=dataset_urn,
+                aspect=view_properties_aspect,
+            ).as_workunit()
             self.report.report_workunit(view_properties_wu)
             yield view_properties_wu
 
@@ -1239,19 +1189,22 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             sql_config=sql_config,
         )
 
+    def get_parent_container_key(self, db_name: str, schema: str) -> PlatformKey:
+        return self.gen_schema_key(db_name, schema)
+
     def add_table_to_schema_container(
         self, dataset_urn: str, db_name: str, schema: str
     ) -> Iterable[Union[MetadataWorkUnit, SqlWorkUnit]]:
-        schema_container_key = self.gen_schema_key(db_name, schema)
+        parent_container_key = self.get_parent_container_key(db_name, schema)
         container_workunits = add_dataset_to_container(
-            container_key=schema_container_key,
+            container_key=parent_container_key,
             dataset_urn=dataset_urn,
         )
         for wu in container_workunits:
             self.report.report_workunit(wu)
             yield wu
 
-    def _get_profiler_instance(self, inspector: Inspector) -> "DatahubGEProfiler":
+    def get_profiler_instance(self, inspector: Inspector) -> "DatahubGEProfiler":
         from datahub.ingestion.source.ge_data_profiler import DatahubGEProfiler
 
         return DatahubGEProfiler(
@@ -1261,19 +1214,45 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             platform=self.platform,
         )
 
+    def get_profile_args(self) -> Dict:
+        """Passed down to GE profiler"""
+        return {}
+
     # Override if needed
     def generate_partition_profiler_query(
         self, schema: str, table: str, partition_datetime: Optional[datetime.datetime]
     ) -> Tuple[Optional[str], Optional[str]]:
         return None, None
 
+    def is_table_partitioned(
+        self, database: Optional[str], schema: str, table: str
+    ) -> Optional[bool]:
+        return None
+
+    # Override if needed
+    def generate_profile_candidates(
+        self,
+        inspector: Inspector,
+        threshold_time: Optional[datetime.datetime],
+        schema: str,
+    ) -> Optional[List[str]]:
+        raise NotImplementedError()
+
     # Override if you want to do additional checks
     def is_dataset_eligible_for_profiling(
-        self, dataset_name: str, sql_config: SQLAlchemyConfig
+        self,
+        dataset_name: str,
+        sql_config: SQLAlchemyConfig,
+        inspector: Inspector,
+        profile_candidates: Optional[List[str]],
     ) -> bool:
-        return sql_config.table_pattern.allowed(
-            dataset_name
-        ) and sql_config.profile_pattern.allowed(dataset_name)
+        return (
+            sql_config.table_pattern.allowed(dataset_name)
+            and sql_config.profile_pattern.allowed(dataset_name)
+        ) and (
+            profile_candidates is None
+            or (profile_candidates is not None and dataset_name in profile_candidates)
+        )
 
     def loop_profiler_requests(
         self,
@@ -1284,6 +1263,25 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         from datahub.ingestion.source.ge_data_profiler import GEProfilerRequest
 
         tables_seen: Set[str] = set()
+        profile_candidates = None  # Default value if profile candidates not available.
+        if (
+            sql_config.profiling.profile_if_updated_since_days is not None
+            or sql_config.profiling.profile_table_size_limit is not None
+            or sql_config.profiling.profile_table_row_limit is None
+        ):
+            try:
+                threshold_time: Optional[datetime.datetime] = None
+                if sql_config.profiling.profile_if_updated_since_days is not None:
+                    threshold_time = datetime.datetime.now(
+                        datetime.timezone.utc
+                    ) - datetime.timedelta(
+                        sql_config.profiling.profile_if_updated_since_days
+                    )
+                profile_candidates = self.generate_profile_candidates(
+                    inspector, threshold_time, schema
+                )
+            except NotImplementedError:
+                logger.debug("Source does not support generating profile candidates.")
 
         for table in inspector.get_table_names(schema):
             schema, table = self.standardize_schema_table_names(
@@ -1292,8 +1290,11 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             dataset_name = self.get_identifier(
                 schema=schema, entity=table, inspector=inspector
             )
-            if not self.is_dataset_eligible_for_profiling(dataset_name, sql_config):
-                self.report.report_dropped(f"profile of {dataset_name}")
+            if not self.is_dataset_eligible_for_profiling(
+                dataset_name, sql_config, inspector, profile_candidates
+            ):
+                if self.config.profiling.report_dropped_profiles:
+                    self.report.report_dropped(f"profile of {dataset_name}")
                 continue
 
             dataset_name = self.normalise_dataset_name(dataset_name)
@@ -1304,9 +1305,25 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 logger.debug(f"{dataset_name} has already been seen, skipping...")
                 continue
 
+            missing_column_info_warn = self.report.warnings.get(MISSING_COLUMN_INFO)
+            if (
+                missing_column_info_warn is not None
+                and dataset_name in missing_column_info_warn
+            ):
+                continue
+
             (partition, custom_sql) = self.generate_partition_profiler_query(
                 schema, table, self.config.profiling.partition_datetime
             )
+
+            if partition is None and self.is_table_partitioned(
+                database=None, schema=schema, table=table
+            ):
+                self.report.report_warning(
+                    "profile skipped as partitioned table is empty or partition id was invalid",
+                    dataset_name,
+                )
+                continue
 
             if (
                 partition is not None
@@ -1318,9 +1335,13 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
                 continue
 
             self.report.report_entity_profiled(dataset_name)
+            logger.debug(
+                f"Preparing profiling request for {schema}, {table}, {partition}"
+            )
             yield GEProfilerRequest(
                 pretty_name=dataset_name,
                 batch_kwargs=self.prepare_profiler_args(
+                    inspector=inspector,
                     schema=schema,
                     table=table,
                     partition=partition,
@@ -1329,10 +1350,16 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
             )
 
     def loop_profiler(
-        self, profile_requests: List["GEProfilerRequest"], profiler: "DatahubGEProfiler"
+        self,
+        profile_requests: List["GEProfilerRequest"],
+        profiler: "DatahubGEProfiler",
+        platform: Optional[str] = None,
     ) -> Iterable[MetadataWorkUnit]:
         for request, profile in profiler.generate_profiles(
-            profile_requests, self.config.profiling.max_workers
+            profile_requests,
+            self.config.profiling.max_workers,
+            platform=platform,
+            profiler_args=self.get_profile_args(),
         ):
             if profile is None:
                 continue
@@ -1357,6 +1384,7 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
 
     def prepare_profiler_args(
         self,
+        inspector: Inspector,
         schema: str,
         table: str,
         partition: Optional[str],
@@ -1370,5 +1398,4 @@ class SQLAlchemySource(StatefulIngestionSourceBase):
         return self.report
 
     def close(self):
-        self.update_default_job_run_summary()
         self.prepare_for_commit()

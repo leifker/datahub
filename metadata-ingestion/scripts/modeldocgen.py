@@ -4,15 +4,14 @@ import logging
 import re
 import unittest.mock
 from dataclasses import Field, dataclass, field
-from enum import Enum, auto
+from enum import auto
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import avro.schema
 import click
-from pydantic import validator
 
-from datahub.configuration.common import ConfigModel
+from datahub.configuration.common import ConfigEnum, ConfigModel
 from datahub.emitter.mce_builder import make_data_platform_urn, make_dataset_urn
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.rest_emitter import DatahubRestEmitter
@@ -20,7 +19,6 @@ from datahub.ingestion.api.common import PipelineContext, RecordEnvelope
 from datahub.ingestion.api.sink import NoopWriteCallback
 from datahub.ingestion.extractor.schema_util import avro_schema_to_mce_fields
 from datahub.ingestion.sink.file import FileSink, FileSinkConfig
-from datahub.metadata.com.linkedin.pegasus2avro.schema import SchemaField
 from datahub.metadata.schema_classes import (
     BrowsePathsClass,
     ChangeTypeClass,
@@ -30,11 +28,11 @@ from datahub.metadata.schema_classes import (
     GlobalTagsClass,
     MetadataChangeEventClass,
     OtherSchemaClass,
+    SchemaFieldClass as SchemaField,
     SchemaFieldDataTypeClass,
     SchemaMetadataClass,
     StringTypeClass,
     SubTypesClass,
-    SystemMetadataClass,
     TagAssociationClass,
 )
 
@@ -43,11 +41,12 @@ logger = logging.getLogger(__name__)
 
 # TODO: Support generating docs for each event type in entity registry.
 
+
 def capitalize_first(something: str) -> str:
     return something[0:1].upper() + something[1:]
 
 
-class EntityCategory(Enum):
+class EntityCategory(ConfigEnum):
     CORE = auto()
     INTERNAL = auto()
 
@@ -71,12 +70,6 @@ class EntityDefinition:
     # def lower_everything(cls, v: str) -> str:
     #    return v.lower()
 
-    @validator("category", pre=True)
-    def find_match(cls, v: str) -> EntityCategory:
-        if isinstance(v, str) and v.upper() == "INTERNAL":
-            return EntityCategory.INTERNAL
-        return EntityCategory.CORE
-
     @property
     def display_name(self):
         return capitalize_first(self.name)
@@ -89,9 +82,11 @@ class AspectDefinition:
     schema: Optional[avro.schema.Schema] = None
     type: Optional[str] = None
 
+
 @dataclass
 class EventDefinition:
     name: str
+
 
 entity_registry: Dict[str, EntityDefinition] = {}
 
@@ -386,7 +381,7 @@ def generate_stitched_record(relnships_graph: RelationshipGraph) -> List[Any]:
             )
             foreign_keys: List[ForeignKeyConstraintClass] = []
             source_dataset_urn = make_dataset_urn(
-                platform=make_data_platform_urn("datahub"),
+                platform="datahub",
                 name=f"{entity_display_name}",
             )
             for f_field in schema_fields:
@@ -444,7 +439,7 @@ def generate_stitched_record(relnships_graph: RelationshipGraph) -> List[Any]:
                             destination_entity_name = capitalize_first(entity_type)
 
                             foreign_dataset_urn = make_dataset_urn(
-                                platform=make_data_platform_urn("datahub"),
+                                platform="datahub",
                                 name=destination_entity_name,
                             )
                             fkey = ForeignKeyConstraintClass(
@@ -478,7 +473,7 @@ def generate_stitched_record(relnships_graph: RelationshipGraph) -> List[Any]:
 
             dataset = DatasetSnapshotClass(
                 urn=make_dataset_urn(
-                    platform=make_data_platform_urn("datahub"),
+                    platform="datahub",
                     name=f"{entity_display_name}",
                 ),
                 aspects=[

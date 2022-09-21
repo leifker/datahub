@@ -144,8 +144,14 @@ class RedshiftAccessEvent(BaseModel):
 
 
 class RedshiftUsageConfig(RedshiftConfig, BaseUsageConfig, EnvBasedSourceConfigBase):
-    email_domain: str = Field(description="")
-    options: Dict = Field(default={}, description="")
+    email_domain: str = Field(
+        description="Email domain of your organisation so users can be displayed on UI appropriately."
+    )
+    options: Dict = Field(
+        default={},
+        description="Any options specified here will be passed to SQLAlchemy's create_engine as kwargs."
+        "See https://docs.sqlalchemy.org/en/14/core/engines.html#sqlalchemy.create_engine for details.",
+    )
 
     def get_sql_alchemy_url(self):
         return super().get_sql_alchemy_url()
@@ -279,7 +285,7 @@ class RedshiftUsageSource(Source):
             logger.debug(f"Filtering out {full_table_name} due to schema_pattern.")
             self.report.report_dropped(full_table_name)
             return False
-        if not self.config.table_pattern.allowed(row["table"]):
+        if not self.config.table_pattern.allowed(full_table_name):
             logger.debug(f"Filtering out {full_table_name} due to table_pattern.")
             self.report.report_dropped(full_table_name)
             return False
@@ -392,6 +398,7 @@ class RedshiftUsageSource(Source):
             ),
             self.config.top_n_queries,
             self.config.format_sql_queries,
+            self.config.include_top_n_queries,
         )
 
     def get_report(self) -> RedshiftUsageSourceReport:

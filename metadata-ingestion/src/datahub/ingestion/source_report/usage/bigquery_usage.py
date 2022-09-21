@@ -17,14 +17,20 @@ class BigQueryUsageSourceReport(SourceReport):
     use_v2_audit_metadata: Optional[bool] = None
     log_page_size: Optional[int] = None
     query_log_delay: Optional[int] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    window_start_time: Optional[datetime] = None
+    window_end_time: Optional[datetime] = None
     allow_pattern: Optional[str] = None
     deny_pattern: Optional[str] = None
     log_entry_start_time: Optional[str] = None
     log_entry_end_time: Optional[str] = None
     num_usage_workunits_emitted: Optional[int] = None
     num_operational_stats_workunits_emitted: Optional[int] = None
+    read_reasons_stat: Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    operation_types_stat: Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
 
     def report_dropped(self, key: str) -> None:
         self.dropped_table[key] += 1

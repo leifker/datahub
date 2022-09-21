@@ -17,6 +17,7 @@ from datahub.metadata.schema_classes import (
     DatasetPropertiesClass,
     DatasetSnapshotClass,
     DatasetUpstreamLineageClass,
+    DomainsClass,
     EditableDatasetPropertiesClass,
     EditableSchemaMetadataClass,
     GlobalTagsClass,
@@ -41,6 +42,7 @@ class SnapshotAspectRegistry:
     def __init__(self):
         self.aspect_name_type_mapping = {
             "ownership": OwnershipClass,
+            "domains": DomainsClass,
             "globalTags": GlobalTagsClass,
             "datasetProperties": DatasetPropertiesClass,
             "editableDatasetProperties": EditableDatasetPropertiesClass,
@@ -132,8 +134,8 @@ class BaseTransformer(Transformer, metaclass=ABCMeta):
                     return True
             # fall through, no entity type matched
             return False
-        elif isinstance(record, MetadataChangeProposalWrapper) or isinstance(
-            record, MetadataChangeProposalClass
+        elif isinstance(
+            record, (MetadataChangeProposalWrapper, MetadataChangeProposalClass)
         ):
             return record.entityType in entity_types
 
@@ -210,7 +212,7 @@ class BaseTransformer(Transformer, metaclass=ABCMeta):
         # remember stuff
         assert envelope.record.entityUrn
         assert isinstance(self, SingleAspectTransformer)
-        if envelope.record.aspectName == self.aspect_name():
+        if envelope.record.aspectName == self.aspect_name() and envelope.record.aspect:
             # we have a match on the aspect name, call the specific transform function
             transformed_aspect = self.transform_aspect(
                 entity_urn=envelope.record.entityUrn,

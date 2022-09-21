@@ -8,6 +8,7 @@ apply plugin: 'signing'
 apply plugin: 'io.codearte.nexus-staging'
 apply plugin: 'maven-publish'
 apply plugin: 'org.hidetake.swagger.generator'
+apply from: "../versioning.gradle"
 import org.apache.tools.ant.filters.ReplaceTokens
 
 jar.enabled = false // Since we only want to build shadow jars, disabling the regular jar creation
@@ -15,73 +16,46 @@ jar.enabled = false // Since we only want to build shadow jars, disabling the re
 dependencies {
 
     implementation project(':metadata-models')
+    compile externalDependency.avro_1_7
+    constraints {
+      implementation('commons-collections:commons-collections:3.2.2') {
+        because 'Vulnerability Issue'
+      }
+    }
     shadow externalDependency.httpAsyncClient // we want our clients to provide this
     implementation externalDependency.jacksonDataBind
     implementation externalDependency.javaxValidation
     implementation externalDependency.springContext
     implementation externalDependency.swaggerAnnotations
+    implementation(externalDependency.kafkaAvroSerializer) {
+      exclude group: "org.apache.avro"
+    }
+    
     compileOnly externalDependency.lombok
     annotationProcessor externalDependency.lombok
     testCompile externalDependency.httpAsyncClient // needed as shadow excludes it
     testCompile externalDependency.mockito
     testCompile externalDependency.mockServer
     testCompile externalDependency.mockServerClient
+    testCompile externalDependency.testContainers
 
     swaggerCodegen 'io.swagger.codegen.v3:swagger-codegen-cli:3.0.33'
 }
 
+task copyAvroSchemas {
+  dependsOn(':metadata-events:mxe-schemas:renameNamespace')
+  copy {
+    from file('../../../metadata-events/mxe-schemas/src/renamed/avro/com/linkedin/mxe/MetadataChangeProposal.avsc')
+    into file('./src/main/resources')
+  }
+}
+
+compileJava.dependsOn copyAvroSchemas
+
+
 jacocoTestReport {
     dependsOn test // tests are required to run before generating the report
 }
-
-
-def detailedVersionString = "0.0.0-unknown-SNAPSHOT"
-def snapshotVersion = false
-if (project.hasProperty("releaseVersion")) {
-  version = releaseVersion
-  detailedVersionString = releaseVersion
-} else {
-  try {
-      // apply this plugin in a try-catch block so that we can handle cases without .git directory
-      apply plugin: "com.palantir.git-version"
-      println("In else section")
-      def details = versionDetails()
-      detailedVersionString = gitVersion()
-      version = details.lastTag
-      version = version.startsWith("v")? version.substring(1): version
-      def suffix = details.isCleanTag? "": "-SNAPSHOT"
-      snapshotVersion = ! details.isCleanTag
-    }
-    catch (Exception e) {
-          e.printStackTrace()
-          // last fall back
-          version = detailedVersionString
-      }
-  }
-    // trim version if it is of size 4 to size 3
-    def versionParts = version.tokenize(".")
-    if (versionParts.size() > 3) {
-      // at-least 4 part version
-      // we check if the 4th part is a .0 in which case we want to create a release
-      if (versionParts[3] != '0') {
-        snapshotVersion = true
-      }
-      versionParts = versionParts[0..2]
-      version = versionParts[0..2].join('.')
-    }
-
-    if (snapshotVersion) {
-        if (versionParts[versionParts.size()-1].isInteger()) {
-          version = versionParts[0..versionParts.size()-2].join('.') + '.' + (versionParts[versionParts.size()-1].toInteger()+1).toString() + "-SNAPSHOT"
-        } else {
-          // we are unable to part the last token as an integer, so we just append SNAPSHOT to this version
-          version = versionParts[0..versionParts.size()-1].join('.') + '-SNAPSHOT'
-      }
-    }
-
-    processResources {
-      filter(ReplaceTokens, tokens:[fullVersion: detailedVersionString])
-    }
 
 test {
   // to avoid simultaneous executions of tests when complete build is run
@@ -100,10 +74,14 @@ shadowJar {
   archiveClassifier = ''
   dependencies {
     exclude(dependency('org.apache.httpcomponents:httpasyncclient'))
+    exclude 'LICENSE'
+    exclude 'NOTICE'
+    exclude 'LICENSE.txt'
   }
   mergeServiceFiles()
   // we relocate namespaces manually, because we want to know exactly which libs we are exposing and why
   // we can move to automatic relocation using ConfigureShadowRelocation after we get to a good place on these first
+  relocate 'org.springframework', 'datahub.shaded.org.springframework'
   relocate 'com.fasterxml.jackson', 'datahub.shaded.jackson'
   relocate 'net.jcip.annotations', 'datahub.shaded.annotations'
   relocate 'javassist', 'datahub.shaded.javassist'
@@ -121,6 +99,21 @@ shadowJar {
   relocate 'com.github.benmanes.caffeine', 'datahub.shaded.com.github.benmanes.caffeine'
   relocate 'org.checkerframework', 'datahub.shaded.org.checkerframework'
   relocate 'com.google.errorprone', 'datahub.shaded.com.google.errorprone'
+  // Below jars added for kafka emitter only
+  relocate 'org.apache.avro', 'datahub.shaded.org.apache.avro'
+  relocate 'org.codehaus.jackson', 'datahub.shaded.org.codehaus.jackson'
+  relocate 'com.thoughtworks.paranamer', 'datahub.shaded.com.thoughtworks.paranamer'
+  relocate 'org.xerial.snappy', 'datahub.shaded.org.xerial.snappy'
+  relocate 'org.apache.kafka', 'datahub.shaded.org.apache.kafka'
+  relocate 'io.confluent', 'datahub.shaded.io.confluent'
+  relocate 'org.apache.zookeeper', 'datahub.shaded.org.apache.zookeeper'
+  relocate 'org.apache.yetus', 'datahub.shaded.org.apache.yetus'
+  relocate 'jline', 'datahub.shaded.jline'
+  relocate 'org.apache.jute', 'datahub.shaded.org.apache.jute'
+  relocate 'org.I0Itec.zkclient', 'datahub.shaded.org.I0Itec.zkclient'
+  relocate 'net.jpountz', 'datahub.shaded.net.jpountz'
+  relocate 'com.github.luben', 'datahub.shaded.com.github.luben'
+ 
   finalizedBy checkShadowJar
 }
 

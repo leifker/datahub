@@ -1,6 +1,6 @@
 import hashlib
 import json
-from typing import Any, Iterable, List, Optional, TypeVar, Union
+from typing import Any, Iterable, List, Optional, TypeVar
 
 from pydantic.fields import Field
 from pydantic.main import BaseModel
@@ -10,17 +10,21 @@ from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.ingestion.api.workunit import MetadataWorkUnit
 from datahub.metadata.com.linkedin.pegasus2avro.common import DataPlatformInstance
 from datahub.metadata.com.linkedin.pegasus2avro.container import ContainerProperties
+from datahub.metadata.com.linkedin.pegasus2avro.events.metadata import ChangeType
 from datahub.metadata.schema_classes import (
     ChangeTypeClass,
     ContainerClass,
     DomainsClass,
     GlobalTagsClass,
+    MetadataChangeEventClass,
     OwnerClass,
     OwnershipClass,
     OwnershipTypeClass,
     SubTypesClass,
     TagAssociationClass,
+    _Aspect,
 )
+from datahub.utilities.urns.urn import guess_entity_type
 
 
 class DatahubKey(BaseModel):
@@ -85,7 +89,6 @@ def add_domain_to_entity_wu(
         entityType=entity_type,
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{entity_urn}",
-        aspectName="domains",
         aspect=DomainsClass(domains=[domain_urn]),
     )
     wu = MetadataWorkUnit(id=f"{domain_urn}-to-{entity_urn}", mcp=mcp)
@@ -99,7 +102,6 @@ def add_owner_to_entity_wu(
         entityType=entity_type,
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{entity_urn}",
-        aspectName="ownership",
         aspect=OwnershipClass(
             owners=[
                 OwnerClass(
@@ -120,13 +122,31 @@ def add_tags_to_entity_wu(
         entityType=entity_type,
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{entity_urn}",
-        aspectName="globalTags",
         aspect=GlobalTagsClass(
             tags=[TagAssociationClass(f"urn:li:tag:{tag}") for tag in tags]
         ),
     )
     wu = MetadataWorkUnit(id=f"tags-to-{entity_urn}", mcp=mcp)
     yield wu
+
+
+def wrap_aspect_as_workunit(
+    entityName: str,
+    entityUrn: str,
+    aspectName: str,
+    aspect: _Aspect,
+) -> MetadataWorkUnit:
+    wu = MetadataWorkUnit(
+        id=f"{aspectName}-for-{entityUrn}",
+        mcp=MetadataChangeProposalWrapper(
+            entityType=entityName,
+            entityUrn=entityUrn,
+            aspectName=aspectName,
+            aspect=aspect,
+            changeType=ChangeType.UPSERT,
+        ),
+    )
+    return wu
 
 
 def gen_containers(
@@ -139,6 +159,7 @@ def gen_containers(
     owner_urn: Optional[str] = None,
     external_url: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    qualified_name: Optional[str] = None,
 ) -> Iterable[MetadataWorkUnit]:
     container_urn = make_container_urn(
         guid=container_key.guid(),
@@ -148,12 +169,12 @@ def gen_containers(
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{container_urn}",
         # entityKeyAspect=ContainerKeyClass(guid=schema_container_key.guid()),
-        aspectName="containerProperties",
         aspect=ContainerProperties(
             name=name,
             description=description,
             customProperties=container_key.dict(exclude_none=True, by_alias=True),
             externalUrl=external_url,
+            qualifiedName=qualified_name,
         ),
     )
     wu = MetadataWorkUnit(id=f"container-info-{name}-{container_urn}", mcp=mcp)
@@ -164,7 +185,6 @@ def gen_containers(
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{container_urn}",
         # entityKeyAspect=ContainerKeyClass(guid=schema_container_key.guid()),
-        aspectName="dataPlatformInstance",
         aspect=DataPlatformInstance(
             platform=f"{make_data_platform_urn(container_key.platform)}",
         ),
@@ -180,7 +200,6 @@ def gen_containers(
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{container_urn}",
         # entityKeyAspect=ContainerKeyClass(guid=schema_container_key.guid()),
-        aspectName="subTypes",
         aspect=SubTypesClass(typeNames=sub_types),
     )
     wu = MetadataWorkUnit(
@@ -220,7 +239,6 @@ def gen_containers(
             changeType=ChangeTypeClass.UPSERT,
             entityUrn=f"{container_urn}",
             # entityKeyAspect=ContainerKeyClass(guid=schema_container_key.guid()),
-            aspectName="container",
             aspect=ContainerClass(container=parent_container_urn),
             # aspect=ContainerKeyClass(guid=database_container_key.guid())
         )
@@ -233,8 +251,10 @@ def gen_containers(
 
 
 def add_dataset_to_container(
-    container_key: KeyType, dataset_urn: str
-) -> Iterable[Union[MetadataWorkUnit]]:
+    # FIXME: Union requires two or more type arguments
+    container_key: KeyType,
+    dataset_urn: str,
+) -> Iterable[MetadataWorkUnit]:
     container_urn = make_container_urn(
         guid=container_key.guid(),
     )
@@ -243,7 +263,6 @@ def add_dataset_to_container(
         entityType="dataset",
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=f"{dataset_urn}",
-        aspectName="container",
         aspect=ContainerClass(container=f"{container_urn}"),
         # aspect=ContainerKeyClass(guid=schema_container_key.guid())
     )
@@ -261,8 +280,21 @@ def add_entity_to_container(
         entityType=entity_type,
         changeType=ChangeTypeClass.UPSERT,
         entityUrn=entity_urn,
-        aspectName="container",
         aspect=ContainerClass(container=f"{container_urn}"),
     )
     wu = MetadataWorkUnit(id=f"container-{container_urn}-to-{entity_urn}", mcp=mcp)
     yield wu
+
+
+def mcps_from_mce(
+    mce: MetadataChangeEventClass,
+) -> Iterable[MetadataChangeProposalWrapper]:
+    for aspect in mce.proposedSnapshot.aspects:
+        yield MetadataChangeProposalWrapper(
+            entityType=guess_entity_type(mce.proposedSnapshot.urn),
+            changeType=ChangeTypeClass.UPSERT,
+            entityUrn=mce.proposedSnapshot.urn,
+            auditHeader=mce.auditHeader,
+            aspect=aspect,
+            systemMetadata=mce.systemMetadata,
+        )

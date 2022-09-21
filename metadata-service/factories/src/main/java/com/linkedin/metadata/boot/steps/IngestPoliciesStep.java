@@ -128,7 +128,8 @@ public class IngestPoliciesStep implements BootstrapStep {
   private void insertPolicyDocument(EntityResponse entityResponse, AspectSpec aspectSpec) {
     EnvelopedAspect aspect = entityResponse.getAspects().get(Constants.DATAHUB_POLICY_INFO_ASPECT_NAME);
     if (aspect == null) {
-      throw new RuntimeException(String.format("Missing policy info aspect for urn %s", entityResponse.getUrn()));
+      log.info("Missing policy info aspect for urn {}", entityResponse.getUrn());
+      return;
     }
 
     Optional<String> searchDocument;
@@ -158,7 +159,7 @@ public class IngestPoliciesStep implements BootstrapStep {
     final MetadataChangeProposal keyAspectProposal = new MetadataChangeProposal();
     final AspectSpec keyAspectSpec = _entityService.getKeyAspectSpec(urn);
     GenericAspect aspect =
-        GenericRecordUtils.serializeAspect(EntityKeyUtils.convertUrnToEntityKey(urn, keyAspectSpec.getPegasusSchema()));
+        GenericRecordUtils.serializeAspect(EntityKeyUtils.convertUrnToEntityKey(urn, keyAspectSpec));
     keyAspectProposal.setAspect(aspect);
     keyAspectProposal.setAspectName(keyAspectSpec.getName());
     keyAspectProposal.setEntityType(POLICY_ENTITY_NAME);

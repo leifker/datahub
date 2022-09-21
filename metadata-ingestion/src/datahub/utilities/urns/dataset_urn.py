@@ -1,6 +1,7 @@
-from typing import List, Set
+from typing import List, Optional
 
-from datahub.metadata.schema_classes import FabricTypeClass
+from datahub.configuration.source_common import ALL_ENV_TYPES
+from datahub.utilities.urn_encoder import UrnEncoder
 from datahub.utilities.urns.data_platform_urn import DataPlatformUrn
 from datahub.utilities.urns.error import InvalidUrnError
 from datahub.utilities.urns.urn import Urn
@@ -13,16 +14,9 @@ class DatasetUrn(Urn):
     """
 
     ENTITY_TYPE: str = "dataset"
-    VALID_FABRIC_SET: Set[str] = set(
-        [
-            str(getattr(FabricTypeClass, attr)).upper()
-            for attr in dir(FabricTypeClass)
-            if not callable(getattr(FabricTypeClass, attr)) and not attr.startswith("_")
-        ]
-    )
 
     def __init__(self, entity_type: str, entity_id: List[str], domain: str = "li"):
-        super().__init__(entity_type, entity_id, domain)
+        super().__init__(entity_type, UrnEncoder.encode_string_array(entity_id), domain)
 
     @classmethod
     def create_from_string(cls, urn_str: str) -> "DatasetUrn":
@@ -55,13 +49,25 @@ class DatasetUrn(Urn):
 
     @classmethod
     def create_from_ids(
-        cls, platform_id: str, table_name: str, env: str
+        cls,
+        platform_id: str,
+        table_name: str,
+        env: str,
+        platform_instance: Optional[str] = None,
     ) -> "DatasetUrn":
-        entity_id: List[str] = [
-            str(DataPlatformUrn.create_from_id(platform_id)),
-            table_name,
-            env,
-        ]
+        entity_id: List[str]
+        if platform_instance:
+            entity_id = [
+                str(DataPlatformUrn.create_from_id(platform_id)),
+                f"{platform_instance}.{table_name}",
+                env,
+            ]
+        else:
+            entity_id = [
+                str(DataPlatformUrn.create_from_id(platform_id)),
+                table_name,
+                env,
+            ]
         return cls(DatasetUrn.ENTITY_TYPE, entity_id)
 
     @staticmethod
@@ -83,7 +89,22 @@ class DatasetUrn(Urn):
 
         DataPlatformUrn.validate(platform_urn_str)
         env = entity_id[2].upper()
-        if env not in DatasetUrn.VALID_FABRIC_SET:
-            raise InvalidUrnError(
-                f"Invalid env:{env}. Allowed evn are {DatasetUrn.VALID_FABRIC_SET}"
-            )
+        if env not in ALL_ENV_TYPES:
+            raise InvalidUrnError(f"Invalid env:{env}. Allowed evn are {ALL_ENV_TYPES}")
+
+    """A helper function to extract simple . path notation from the v2 field path"""
+
+    @staticmethod
+    def _get_simple_field_path_from_v2_field_path(field_path: str) -> str:
+        if field_path.startswith("[version=2.0]"):
+            # this is a v2 field path
+            tokens = [
+                t
+                for t in field_path.split(".")
+                if not (t.startswith("[") or t.endswith("]"))
+            ]
+            path = ".".join(tokens)
+            return path
+        else:
+            # not a v2, we assume this is a simple path
+            return field_path

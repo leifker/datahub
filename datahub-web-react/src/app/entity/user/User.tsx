@@ -1,7 +1,7 @@
 import { UserOutlined } from '@ant-design/icons';
 import * as React from 'react';
 import { CorpUser, EntityType, SearchResult } from '../../../types.generated';
-import { Entity, IconStyleType, PreviewType } from '../Entity';
+import { Entity, EntityCapabilityType, IconStyleType, PreviewType } from '../Entity';
 import { getDataForEntityType } from '../shared/containers/profile/utils';
 import { Preview } from './preview/Preview';
 import UserProfile from './UserProfile';
@@ -67,11 +67,16 @@ export class UserEntity implements Entity<CorpUser> {
             data.properties?.fullName ||
             data.info?.displayName || // Deprecated info field
             data.info?.fullName || // Deprecated info field
-            data.username
+            data.username ||
+            data.urn
         );
     };
 
     getGenericEntityProperties = (user: CorpUser) => {
         return getDataForEntityType({ data: user, entityType: this.type, getOverrideProperties: (data) => data });
+    };
+
+    supportedCapabilities = () => {
+        return new Set([EntityCapabilityType.ROLES]);
     };
 }

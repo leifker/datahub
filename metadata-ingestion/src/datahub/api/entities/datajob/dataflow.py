@@ -75,7 +75,7 @@ class DataFlow:
         tags = GlobalTagsClass(
             tags=[
                 TagAssociationClass(tag=builder.make_tag_urn(tag))
-                for tag in (self.tags or [])
+                for tag in (sorted(self.tags) or [])
             ]
         )
         return [tags]
@@ -142,7 +142,7 @@ class DataFlow:
         """
         Emit the DataFlow entity to Datahub
 
-        :param emitter: Datahub Emitter to emit the proccess event
+        :param emitter: Datahub Emitter to emit the process event
         :param callback: (Optional[Callable[[Exception, str], None]]) the callback method for KafkaEmitter if it is used
         """
         for mcp in self.generate_mcp():

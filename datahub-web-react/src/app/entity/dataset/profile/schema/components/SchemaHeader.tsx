@@ -1,20 +1,28 @@
 import React from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
-import { Button, Popover, Radio, Select, Typography } from 'antd';
-import { CaretDownOutlined, FileTextOutlined, InfoCircleOutlined, TableOutlined } from '@ant-design/icons';
-import styled from 'styled-components';
+import { Button, Input, Popover, Select, Tooltip, Typography } from 'antd';
+import { debounce } from 'lodash';
+import {
+    AuditOutlined,
+    CaretDownOutlined,
+    FileTextOutlined,
+    QuestionCircleOutlined,
+    SearchOutlined,
+    TableOutlined,
+} from '@ant-design/icons';
+import styled from 'styled-components/macro';
 import CustomPagination from './CustomPagination';
 import TabToolbar from '../../../../shared/components/styled/TabToolbar';
 import { SemanticVersionStruct } from '../../../../../../types.generated';
 import { toRelativeTimeString } from '../../../../../shared/time/timeUtils';
-import { SchemaViewType } from '../utils/types';
-import { ANTD_GRAY } from '../../../../shared/constants';
+import { ANTD_GRAY, REDESIGN_COLORS } from '../../../../shared/constants';
 import { navigateToVersionedDatasetUrl } from '../../../../shared/tabs/Dataset/Schema/utils/navigateToVersionedDatasetUrl';
+import SchemaTimeStamps from './SchemaTimeStamps';
+import getSchemaFilterFromQueryString from '../../../../shared/tabs/Dataset/Schema/utils/getSchemaFilterFromQueryString';
 
 const SchemaHeaderContainer = styled.div`
     display: flex;
     justify-content: space-between;
-    padding-bottom: 16px;
     width: 100%;
 `;
 
@@ -54,11 +62,12 @@ const ValueButton = styled(Button)<{ $highlighted: boolean }>`
 
 const KeyValueButtonGroup = styled.div`
     margin-right: 10px;
-    display: inline-block;
+    display: flex;
 `;
 
 // Below styles are for buttons on the right side of the Schema Header
 const RightButtonsGroup = styled.div`
+    padding-left: 5px;
     &&& {
         display: flex;
         justify-content: right;
@@ -85,34 +94,16 @@ const SchemaBlameSelectorOption = styled(Select.Option)`
     }
 `;
 
-const BlameRadio = styled(Radio.Group)`
+const SchemaAuditButton = styled(Button)`
     &&& {
         margin-top: 6px;
-        margin-right: 10px;
-        min-width: 140px;
     }
 `;
 
-const BlameRadioButton = styled(Radio.Button)`
+const StyledQuestionCircleOutlined = styled(QuestionCircleOutlined)`
     &&& {
-        min-width: 30px;
-    }
-`;
-
-const CurrentVersionTimestampText = styled(Typography.Text)`
-    &&& {
-        line-height: 22px;
-        margin-top: 10px;
-        margin-right: 10px;
-        color: ${ANTD_GRAY[7]};
-        min-width: 220px;
-    }
-`;
-
-const StyledInfoCircleOutlined = styled(InfoCircleOutlined)`
-    &&& {
-        margin-top: 12px;
-        font-size: 20px;
+        margin-top: 14px;
+        font-size: 16px;
         color: ${ANTD_GRAY[6]};
     }
 `;
@@ -122,6 +113,14 @@ const StyledCaretDownOutlined = styled(CaretDownOutlined)`
         margin-top: 8px;
     }
 `;
+
+const StyledInput = styled(Input)`
+    border-radius: 70px;
+    max-width: 300px;
+`;
+
+const MAX_ROWS_BEFORE_DEBOUNCE = 50;
+const HALF_SECOND_IN_MS = 500;
 
 type Props = {
     maxVersion?: number;
@@ -134,11 +133,14 @@ type Props = {
     hasKeySchema: boolean;
     showKeySchema: boolean;
     setShowKeySchema: (show: boolean) => void;
-    lastUpdatedTimeString: string;
+    lastUpdated?: number | null;
+    lastObserved?: number | null;
     selectedVersion: string;
     versionList: Array<SemanticVersionStruct>;
-    schemaView: SchemaViewType;
-    setSchemaView: any;
+    showSchemaAuditView: boolean;
+    setShowSchemaAuditView: any;
+    setFilterText: (text: string) => void;
+    numRows: number;
 };
 
 export default function SchemaHeader({
@@ -152,11 +154,14 @@ export default function SchemaHeader({
     hasKeySchema,
     showKeySchema,
     setShowKeySchema,
-    lastUpdatedTimeString,
+    lastUpdated,
+    lastObserved,
     selectedVersion,
     versionList,
-    schemaView,
-    setSchemaView,
+    showSchemaAuditView,
+    setShowSchemaAuditView,
+    setFilterText,
+    numRows,
 }: Props) {
     const history = useHistory();
     const location = useLocation();
@@ -174,6 +179,7 @@ export default function SchemaHeader({
             'unknown';
         return `${semanticVersion.semanticVersion} - ${semanticVersionTimestampString}`;
     };
+    const numVersions = versionList.length;
 
     const renderOptions = () => {
         return versionList.map(
@@ -189,10 +195,13 @@ export default function SchemaHeader({
                 ),
         );
     };
+    const schemaAuditToggleText = showSchemaAuditView ? 'Close column history' : 'View column history';
 
-    const onSchemaViewToggle = (e) => {
-        setSchemaView(e.target.value);
-    };
+    const debouncedSetFilterText = debounce(
+        (e: React.ChangeEvent<HTMLInputElement>) => setFilterText(e.target.value),
+        numRows > MAX_ROWS_BEFORE_DEBOUNCE ? HALF_SECOND_IN_MS : 0,
+    );
+    const schemaFilter = getSchemaFilterFromQueryString(location);
 
     const docLink = 'https://datahubproject.io/docs/dev-guides/timeline/';
     return (
@@ -231,48 +240,63 @@ export default function SchemaHeader({
                         ) : (
                             <ShowVersionButton onClick={() => setEditMode?.(true)}>Back</ShowVersionButton>
                         ))}
+                    {!showRaw && (
+                        <StyledInput
+                            defaultValue={schemaFilter}
+                            placeholder="Search in schema..."
+                            onChange={debouncedSetFilterText}
+                            allowClear
+                            prefix={<SearchOutlined />}
+                        />
+                    )}
                 </LeftButtonsGroup>
                 <RightButtonsGroup>
-                    <CurrentVersionTimestampText>{lastUpdatedTimeString}</CurrentVersionTimestampText>
-                    <BlameRadio value={schemaView} onChange={onSchemaViewToggle}>
-                        <BlameRadioButton value={SchemaViewType.NORMAL} data-testid="schema-normal-button">
-                            Normal
-                        </BlameRadioButton>
-                        <BlameRadioButton value={SchemaViewType.BLAME} data-testid="schema-blame-button">
-                            Blame
-                        </BlameRadioButton>
-                    </BlameRadio>
-                    <SchemaBlameSelector
-                        value={selectedVersion}
-                        onChange={(e) => {
-                            const datasetVersion: string = e as string;
-                            navigateToVersionedDatasetUrl({
-                                location,
-                                history,
-                                datasetVersion,
-                            });
-                        }}
-                        data-testid="schema-version-selector-dropdown"
-                        suffixIcon={<StyledCaretDownOutlined />}
-                    >
-                        {renderOptions()}
-                    </SchemaBlameSelector>
-                    <Popover
-                        overlayStyle={{ maxWidth: 240 }}
-                        placement="right"
-                        content={
-                            <div>
-                                Semantic versions for this view were computed using Technical Schema. You can find more
-                                info about how we compute versions
-                                <a target="_blank" rel="noreferrer noopener" href={docLink}>
-                                    {' '}
-                                    here.{' '}
-                                </a>
-                            </div>
-                        }
-                    >
-                        <StyledInfoCircleOutlined />
-                    </Popover>
+                    <SchemaTimeStamps lastObserved={lastObserved} lastUpdated={lastUpdated} />
+                    <Tooltip title={schemaAuditToggleText}>
+                        <SchemaAuditButton
+                            type="text"
+                            data-testid="schema-blame-button"
+                            onClick={() => setShowSchemaAuditView(!showSchemaAuditView)}
+                            style={{ color: showSchemaAuditView ? REDESIGN_COLORS.BLUE : ANTD_GRAY[7] }}
+                        >
+                            <AuditOutlined />
+                        </SchemaAuditButton>
+                    </Tooltip>
+                    {numVersions > 1 && (
+                        <>
+                            <SchemaBlameSelector
+                                value={selectedVersion}
+                                onChange={(e) => {
+                                    const datasetVersion: string = e as string;
+                                    navigateToVersionedDatasetUrl({
+                                        location,
+                                        history,
+                                        datasetVersion,
+                                    });
+                                }}
+                                data-testid="schema-version-selector-dropdown"
+                                suffixIcon={<StyledCaretDownOutlined />}
+                            >
+                                {renderOptions()}
+                            </SchemaBlameSelector>
+                            <Popover
+                                overlayStyle={{ maxWidth: 240 }}
+                                placement="right"
+                                content={
+                                    <div>
+                                        Semantic versions for this view were computed using Technical Schema. You can
+                                        find more info about how DataHub computes versions
+                                        <a target="_blank" rel="noreferrer noopener" href={docLink}>
+                                            {' '}
+                                            here.{' '}
+                                        </a>
+                                    </div>
+                                }
+                            >
+                                <StyledQuestionCircleOutlined />
+                            </Popover>
+                        </>
+                    )}
                 </RightButtonsGroup>
             </SchemaHeaderContainer>
         </TabToolbar>

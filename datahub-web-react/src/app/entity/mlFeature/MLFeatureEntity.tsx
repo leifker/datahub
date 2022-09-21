@@ -2,7 +2,7 @@ import * as React from 'react';
 import { DotChartOutlined } from '@ant-design/icons';
 import { MlFeature, EntityType, SearchResult, OwnershipType } from '../../../types.generated';
 import { Preview } from './preview/Preview';
-import { Entity, IconStyleType, PreviewType } from '../Entity';
+import { Entity, EntityCapabilityType, IconStyleType, PreviewType } from '../Entity';
 import { getDataForEntityType } from '../shared/containers/profile/utils';
 import { EntityProfile } from '../shared/containers/profile/EntityProfile';
 import { GenericEntityProperties } from '../shared/types';
@@ -14,6 +14,7 @@ import { SidebarDomainSection } from '../shared/containers/profile/sidebar/Domai
 import { DocumentationTab } from '../shared/tabs/Documentation/DocumentationTab';
 import { FeatureTableTab } from '../shared/tabs/ML/MlFeatureFeatureTableTab';
 import { LineageTab } from '../shared/tabs/Lineage/LineageTab';
+import { EntityMenuItems } from '../shared/EntityDropdown/EntityDropdown';
 
 /**
  * Definition of the DataHub MLFeature entity.
@@ -68,7 +69,7 @@ export class MLFeatureEntity implements Entity<MlFeature> {
             entityType={EntityType.Mlfeature}
             useEntityQuery={useGetMlFeatureQuery}
             getOverrideProperties={this.getOverridePropertiesFromEntity}
-            showDeprecateOption
+            headerDropdownItems={new Set([EntityMenuItems.COPY_URL, EntityMenuItems.UPDATE_DEPRECATION])}
             tabs={[
                 {
                     name: 'Feature Tables',
@@ -143,12 +144,13 @@ export class MLFeatureEntity implements Entity<MlFeature> {
                 description={data.description || ''}
                 owners={data.ownership?.owners}
                 platform={platform}
+                platformInstanceId={data.dataPlatformInstance?.instanceId}
             />
         );
     };
 
     displayName = (data: MlFeature) => {
-        return data.name;
+        return data.name || data.urn;
     };
 
     getGenericEntityProperties = (mlFeature: MlFeature) => {
@@ -169,5 +171,16 @@ export class MLFeatureEntity implements Entity<MlFeature> {
             // eslint-disable-next-line
             platform: entity?.['featureTables']?.relationships?.[0]?.entity?.platform?.name,
         };
+    };
+
+    supportedCapabilities = () => {
+        return new Set([
+            EntityCapabilityType.OWNERS,
+            EntityCapabilityType.GLOSSARY_TERMS,
+            EntityCapabilityType.TAGS,
+            EntityCapabilityType.DOMAINS,
+            EntityCapabilityType.DEPRECATION,
+            EntityCapabilityType.SOFT_DELETE,
+        ]);
     };
 }

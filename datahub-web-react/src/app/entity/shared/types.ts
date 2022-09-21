@@ -17,14 +17,20 @@ import {
     Ownership,
     OwnershipUpdate,
     SchemaMetadata,
-    StringMapEntry,
     EntityLineageResult,
-    Domain,
     SubTypes,
     Container,
     Health,
     Status,
     Deprecation,
+    DataPlatformInstance,
+    ParentContainersResult,
+    EntityRelationshipsResult,
+    ParentNodesResult,
+    SiblingProperties,
+    CustomPropertiesEntry,
+    DomainAssociation,
+    InputFields,
 } from '../../../types.generated';
 import { FetchedEntity } from '../../lineage/types';
 
@@ -46,19 +52,26 @@ export type EntitySidebarSection = {
     properties?: any;
 };
 
+export type EntitySubHeaderSection = {
+    component: React.FunctionComponent<{ properties?: any }>;
+};
+
 export type GenericEntityProperties = {
     urn?: string;
     name?: Maybe<string>;
     properties?: Maybe<{
         description?: Maybe<string>;
         qualifiedName?: Maybe<string>;
+        sourceUrl?: Maybe<string>;
+        sourceRef?: Maybe<string>;
     }>;
     globalTags?: Maybe<GlobalTags>;
     glossaryTerms?: Maybe<GlossaryTerms>;
     ownership?: Maybe<Ownership>;
-    domain?: Maybe<Domain>;
+    domain?: Maybe<DomainAssociation>;
     platform?: Maybe<DataPlatform>;
-    customProperties?: Maybe<StringMapEntry[]>;
+    dataPlatformInstance?: Maybe<DataPlatformInstance>;
+    customProperties?: Maybe<CustomPropertiesEntry[]>;
     institutionalMemory?: Maybe<InstitutionalMemory>;
     schemaMetadata?: Maybe<SchemaMetadata>;
     externalUrl?: Maybe<string>;
@@ -73,9 +86,17 @@ export type GenericEntityProperties = {
     subTypes?: Maybe<SubTypes>;
     entityCount?: number;
     container?: Maybe<Container>;
-    health?: Maybe<Health>;
+    health?: Maybe<Array<Health>>;
     status?: Maybe<Status>;
     deprecation?: Maybe<Deprecation>;
+    parentContainers?: Maybe<ParentContainersResult>;
+    children?: Maybe<EntityRelationshipsResult>;
+    parentNodes?: Maybe<ParentNodesResult>;
+    isAChildren?: Maybe<EntityRelationshipsResult>;
+    siblings?: Maybe<SiblingProperties>;
+    siblingPlatforms?: Maybe<DataPlatform[]>;
+    lastIngested?: Maybe<number>;
+    inputFields?: Maybe<InputFields>;
 };
 
 export type GenericEntityUpdate = {
@@ -102,6 +123,7 @@ export type UpdateEntityType<U> = (
 export type EntityContextType = {
     urn: string;
     entityType: EntityType;
+    dataNotCombinedWithSiblings: any;
     entityData: GenericEntityProperties | null;
     baseEntity: any;
     updateEntity?: UpdateEntityType<any> | null;
@@ -112,4 +134,9 @@ export type EntityContextType = {
 
 export type RequiredAndNotNull<T> = {
     [P in keyof T]-?: Exclude<T[P], null | undefined>;
+};
+
+export type EntityAndType = {
+    urn: string;
+    type: EntityType;
 };

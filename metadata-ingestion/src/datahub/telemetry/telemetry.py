@@ -11,10 +11,12 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 from mixpanel import Consumer, Mixpanel
 
 import datahub as datahub_package
+from datahub.cli.cli_utils import DATAHUB_ROOT_FOLDER
+from datahub.ingestion.graph.client import DataHubGraph
 
 logger = logging.getLogger(__name__)
 
-DATAHUB_FOLDER = Path(os.path.expanduser("~/.datahub"))
+DATAHUB_FOLDER = Path(DATAHUB_ROOT_FOLDER)
 
 CONFIG_FILE = DATAHUB_FOLDER / "telemetry-config.json"
 
@@ -84,6 +86,7 @@ if any(var in os.environ for var in CI_ENV_VARS):
     ENV_ENABLED = False
 
 TIMEOUT = int(os.environ.get("DATAHUB_TELEMETRY_TIMEOUT", "10"))
+MIXPANEL_ENDPOINT = "track.datahubproject.io/mp"
 MIXPANEL_TOKEN = "5ee83d940754d63cacbf7d34daa6f44a"
 
 
@@ -99,15 +102,22 @@ class Telemetry:
         if not CONFIG_FILE.exists() or not self.load_config():
             # set up defaults
             self.client_id = str(uuid.uuid4())
-            self.enabled = self.enabled & ENV_ENABLED
-            self.update_config()
+            self.enabled = self.enabled and ENV_ENABLED
+            if not self.update_config():
+                # If we're not able to persist the client ID, we should default
+                # to a standardized value. This prevents us from minting a new
+                # client ID every time we start the CLI.
+                self.client_id = "00000000-0000-0000-0000-000000000001"
 
         # send updated user-level properties
         self.mp = None
         if self.enabled:
             try:
                 self.mp = Mixpanel(
-                    MIXPANEL_TOKEN, consumer=Consumer(request_timeout=int(TIMEOUT))
+                    MIXPANEL_TOKEN,
+                    consumer=Consumer(
+                        request_timeout=int(TIMEOUT), api_host=MIXPANEL_ENDPOINT
+                    ),
                 )
             except Exception as e:
                 logger.debug(f"Error connecting to mixpanel: {e}")
@@ -208,13 +218,14 @@ class Telemetry:
                 },
             )
         except Exception as e:
-            logger.debug(f"Error reporting telemetry: {e}")
+            logger.debug(f"Error initializing telemetry: {e}")
         self.init_track = True
 
     def ping(
         self,
         event_name: str,
-        properties: Optional[Dict[str, Any]] = None,
+        properties: Dict[str, Any] = {},
+        server: Optional[DataHubGraph] = None,
     ) -> None:
         """
         Send a single telemetry event.
@@ -230,10 +241,29 @@ class Telemetry:
         # send event
         try:
             logger.debug("Sending Telemetry")
+            properties.update(self._server_props(server))
             self.mp.track(self.client_id, event_name, properties)
 
         except Exception as e:
             logger.debug(f"Error reporting telemetry: {e}")
+
+    def _server_props(self, server: Optional[DataHubGraph]) -> Dict[str, str]:
+        if not server:
+            return {
+                "server_type": "n/a",
+                "server_version": "n/a",
+                "server_id": "n/a",
+            }
+        else:
+            return {
+                "server_type": server.server_config.get("datahub", {}).get(
+                    "serverType", "missing"
+                ),
+                "server_version": server.server_config.get("versions", {})
+                .get("linkedin/datahub", {})
+                .get("version", "missing"),
+                "server_id": server.server_id or "missing",
+            }
 
 
 telemetry_instance = Telemetry()
@@ -241,18 +271,18 @@ telemetry_instance = Telemetry()
 T = TypeVar("T")
 
 
-def set_telemetry_enable(enable: bool) -> Any:
-    telemetry_instance.enabled = enable
-    if not enable:
-        logger.info("Disabling Telemetry locally due to server config")
-    telemetry_instance.update_config()
+def suppress_telemetry() -> Any:
+    """disables telemetry for this invocation, doesn't affect persistent client settings"""
+    if telemetry_instance.enabled:
+        logger.debug("Disabling telemetry locally due to server config")
+    telemetry_instance.enabled = False
 
 
 def get_full_class_name(obj):
     module = obj.__class__.__module__
     if module is None or module == str.__class__.__module__:
         return obj.__class__.__name__
-    return module + "." + obj.__class__.__name__
+    return f"{module}.{obj.__class__.__name__}"
 
 
 def with_telemetry(func: Callable[..., T]) -> Callable[..., T]:

@@ -2,6 +2,7 @@ package com.linkedin.entity.client;
 
 import com.datahub.authentication.Authentication;
 import com.datahub.util.RecordUtils;
+import com.google.common.collect.ImmutableList;
 import com.linkedin.common.VersionedUrn;
 import com.linkedin.common.client.BaseClient;
 import com.linkedin.common.urn.Urn;
@@ -18,7 +19,9 @@ import com.linkedin.entity.EntitiesDoAutocompleteRequestBuilder;
 import com.linkedin.entity.EntitiesDoBatchGetTotalEntityCountRequestBuilder;
 import com.linkedin.entity.EntitiesDoBatchIngestRequestBuilder;
 import com.linkedin.entity.EntitiesDoBrowseRequestBuilder;
+import com.linkedin.entity.EntitiesDoDeleteReferencesRequestBuilder;
 import com.linkedin.entity.EntitiesDoDeleteRequestBuilder;
+import com.linkedin.entity.EntitiesDoExistsRequestBuilder;
 import com.linkedin.entity.EntitiesDoFilterRequestBuilder;
 import com.linkedin.entity.EntitiesDoGetBrowsePathsRequestBuilder;
 import com.linkedin.entity.EntitiesDoIngestRequestBuilder;
@@ -37,6 +40,8 @@ import com.linkedin.entity.EntitiesVersionedV2RequestBuilders;
 import com.linkedin.entity.Entity;
 import com.linkedin.entity.EntityArray;
 import com.linkedin.entity.EntityResponse;
+import com.linkedin.entity.RunsDoRollbackRequestBuilder;
+import com.linkedin.entity.RunsRequestBuilders;
 import com.linkedin.metadata.aspect.EnvelopedAspect;
 import com.linkedin.metadata.aspect.VersionedAspect;
 import com.linkedin.metadata.browse.BrowseResult;
@@ -44,6 +49,11 @@ import com.linkedin.metadata.graph.LineageDirection;
 import com.linkedin.metadata.query.AutoCompleteResult;
 import com.linkedin.metadata.query.ListResult;
 import com.linkedin.metadata.query.ListUrnsResult;
+import com.linkedin.metadata.query.filter.Condition;
+import com.linkedin.metadata.query.filter.ConjunctiveCriterion;
+import com.linkedin.metadata.query.filter.ConjunctiveCriterionArray;
+import com.linkedin.metadata.query.filter.Criterion;
+import com.linkedin.metadata.query.filter.CriterionArray;
 import com.linkedin.metadata.query.filter.Filter;
 import com.linkedin.metadata.query.filter.SortCriterion;
 import com.linkedin.metadata.search.LineageSearchResult;
@@ -62,6 +72,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -71,8 +82,6 @@ import javax.annotation.Nullable;
 import javax.mail.MethodNotSupportedException;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-
-import static com.linkedin.metadata.search.utils.QueryUtils.newFilter;
 
 
 @Slf4j
@@ -84,6 +93,7 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
       new EntitiesVersionedV2RequestBuilders();
   private static final AspectsRequestBuilders ASPECTS_REQUEST_BUILDERS = new AspectsRequestBuilders();
   private static final PlatformRequestBuilders PLATFORM_REQUEST_BUILDERS = new PlatformRequestBuilders();
+  private static final RunsRequestBuilders RUNS_REQUEST_BUILDERS = new RunsRequestBuilders();
 
   public RestliEntityClient(@Nonnull final Client restliClient) {
     super(restliClient);
@@ -107,9 +117,9 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
 
   /**
    * Legacy! Use {#batchGetV2} instead, as this method leverages Snapshot models, and will not work
-   * for fetching entities + aspects added by Entity Registry configuration. 
+   * for fetching entities + aspects added by Entity Registry configuration.
    *
-   * Batch get a set of {@link Entity} objects by urn.  
+   * Batch get a set of {@link Entity} objects by urn.
    *
    * @param urns the urns of the entities to batch get
    * @param authentication the authentication to include in the request to the Metadata Service
@@ -147,9 +157,9 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
   }
 
   /**
-   * Batch get a set of aspects for a single entity. 
+   * Batch get a set of aspects for a single entity.
    *
-   * @param entityName the entity type to fetch 
+   * @param entityName the entity type to fetch
    * @param urns the urns of the entities to batch get
    * @param aspectNames the aspect names to batch get
    * @param authentication the authentication to include in the request to the Metadata Service
@@ -209,9 +219,9 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
   }
 
   /**
-   * Autocomplete a search query for a particular field of an entity. 
+   * Autocomplete a search query for a particular field of an entity.
    *
-   * @param entityType the entity type to autocomplete against, e.g. 'dataset' 
+   * @param entityType the entity type to autocomplete against, e.g. 'dataset'
    * @param query search query
    * @param field field of the dataset
    * @param requestFilters autocomplete filters
@@ -233,9 +243,9 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
   }
 
   /**
-   * Autocomplete a search query for a particular entity type. 
+   * Autocomplete a search query for a particular entity type.
    *
-   * @param entityType the entity type to autocomplete against, e.g. 'dataset' 
+   * @param entityType the entity type to autocomplete against, e.g. 'dataset'
    * @param query search query
    * @param requestFilters autocomplete filters
    * @param limit max number of autocomplete results
@@ -416,7 +426,7 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
   @Nonnull
   @Override
   public LineageSearchResult searchAcrossLineage(@Nonnull Urn sourceUrn, @Nonnull LineageDirection direction,
-      @Nonnull List<String> entities, @Nonnull String input, @Nullable Filter filter,
+      @Nonnull List<String> entities, @Nonnull String input, @Nullable Integer maxHops, @Nullable Filter filter,
       @Nullable SortCriterion sortCriterion, int start, int count, @Nonnull final Authentication authentication)
       throws RemoteInvocationException {
 
@@ -487,6 +497,16 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
     sendClientRequest(requestBuilder, authentication);
   }
 
+  /**
+   * Delete all references to a particular entity.
+   */
+  @Override
+  public void deleteEntityReferences(@Nonnull Urn urn, @Nonnull Authentication authentication)
+      throws RemoteInvocationException {
+    EntitiesDoDeleteReferencesRequestBuilder requestBuilder = ENTITIES_REQUEST_BUILDERS.actionDeleteReferences().urnParam(urn.toString());
+    sendClientRequest(requestBuilder, authentication);
+  }
+
   @Nonnull
   @Override
   public SearchResult filter(@Nonnull String entity, @Nonnull Filter filter, @Nullable SortCriterion sortCriterion,
@@ -499,6 +519,14 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
     if (sortCriterion != null) {
       requestBuilder.sortParam(sortCriterion);
     }
+    return sendClientRequest(requestBuilder, authentication).getEntity();
+  }
+
+  @Nonnull
+  @Override
+  public boolean exists(@Nonnull Urn urn, @Nonnull final Authentication authentication) throws RemoteInvocationException {
+    EntitiesDoExistsRequestBuilder requestBuilder = ENTITIES_REQUEST_BUILDERS.actionExists()
+        .urnParam(urn.toString());
     return sendClientRequest(requestBuilder, authentication).getEntity();
   }
 
@@ -650,5 +678,33 @@ public class RestliEntityClient extends BaseClient implements EntityClient {
       requestBuilder.keyParam(key);
     }
     sendClientRequest(requestBuilder, authentication);
+  }
+
+  @Override
+  public void rollbackIngestion(@Nonnull String runId, @Nonnull final Authentication authentication)
+      throws Exception {
+    final RunsDoRollbackRequestBuilder requestBuilder = RUNS_REQUEST_BUILDERS.actionRollback().runIdParam(runId).dryRunParam(false);
+    sendClientRequest(requestBuilder, authentication);
+  }
+
+  // TODO: Refactor QueryUtils inside of metadata-io to extract these methods into a single shared library location.
+  // Creates new Filter from a map of Criteria by removing null-valued Criteria and using EQUAL condition (default).
+  @Nonnull
+  public static Filter newFilter(@Nullable Map<String, String> params) {
+    if (params == null) {
+      return new Filter().setOr(new ConjunctiveCriterionArray());
+    }
+    CriterionArray criteria = params.entrySet()
+        .stream()
+        .filter(e -> Objects.nonNull(e.getValue()))
+        .map(e -> newCriterion(e.getKey(), e.getValue(), Condition.EQUAL))
+        .collect(Collectors.toCollection(CriterionArray::new));
+    return new Filter().setOr(
+        new ConjunctiveCriterionArray(ImmutableList.of(new ConjunctiveCriterion().setAnd(criteria))));
+  }
+
+  @Nonnull
+  public static Criterion newCriterion(@Nonnull String field, @Nonnull String value, @Nonnull Condition condition) {
+    return new Criterion().setField(field).setValue(value).setCondition(condition);
   }
 }

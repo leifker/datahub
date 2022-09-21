@@ -1,7 +1,7 @@
 import json
 import uuid
 from textwrap import dedent
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import sqlalchemy
 
@@ -13,7 +13,7 @@ from sqlalchemy.engine import reflection
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.sql import sqltypes
 from sqlalchemy.sql.type_api import TypeEngine
-from trino.exceptions import TrinoQueryError  # noqa
+from trino.exceptions import TrinoQueryError
 from trino.sqlalchemy import datatype, error
 from trino.sqlalchemy.dialect import TrinoDialect
 
@@ -71,8 +71,9 @@ def get_table_comment(self, connection, table_name: str, schema: str = None, **k
 
         # Generate properties dictionary.
         properties = {}
-        for col_name, col_value in row.items():
-            properties[col_name] = col_value
+        if row:
+            for col_name, col_value in row.items():
+                properties[col_name] = col_value
 
         return {"text": properties.get("comment", None), "properties": properties}
     except TrinoQueryError as e:
@@ -175,7 +176,11 @@ class TrinoSource(SQLAlchemySource):
         return cls(config, ctx)
 
     def get_schema_fields_for_column(
-        self, dataset_name: str, column: dict, pk_constraints: dict = None
+        self,
+        dataset_name: str,
+        column: dict,
+        pk_constraints: dict = None,
+        tags: Optional[List[str]] = None,
     ) -> List[SchemaField]:
 
         fields = super().get_schema_fields_for_column(

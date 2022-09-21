@@ -9,12 +9,11 @@ from hashlib import md5
 from typing import Any, List, Optional, Type, TypeVar, Union, cast, get_type_hints
 
 import typing_inspect
-from avrogen.dict_wrapper import DictWrapper
 
 from datahub.configuration.source_common import DEFAULT_ENV as DEFAULT_ENV_CONFIGURATION
 from datahub.emitter.serialization_helper import pre_json_transform
-from datahub.metadata.com.linkedin.pegasus2avro.common import GlossaryTerms
 from datahub.metadata.schema_classes import (
+    AssertionKeyClass,
     AuditStampClass,
     ContainerKeyClass,
     DatasetKeyClass,
@@ -22,6 +21,7 @@ from datahub.metadata.schema_classes import (
     DatasetSnapshotClass,
     GlobalTagsClass,
     GlossaryTermAssociationClass,
+    GlossaryTermsClass as GlossaryTerms,
     MetadataChangeEventClass,
     OwnerClass,
     OwnershipClass,
@@ -32,9 +32,12 @@ from datahub.metadata.schema_classes import (
     TagAssociationClass,
     UpstreamClass,
     UpstreamLineageClass,
+    _Aspect as AspectAbstract,
 )
+from datahub.utilities.urns.dataset_urn import DatasetUrn
 
 logger = logging.getLogger(__name__)
+Aspect = TypeVar("Aspect", bound=AspectAbstract)
 
 DEFAULT_ENV = DEFAULT_ENV_CONFIGURATION
 DEFAULT_FLOW_CLUSTER = "prod"
@@ -67,9 +70,9 @@ def make_data_platform_urn(platform: str) -> str:
 
 
 def make_dataset_urn(platform: str, name: str, env: str = DEFAULT_ENV) -> str:
-    if DATASET_URN_TO_LOWER:
-        name = name.lower()
-    return f"urn:li:dataset:({make_data_platform_urn(platform)},{name},{env})"
+    return make_dataset_urn_with_platform_instance(
+        platform=platform, name=name, platform_instance=None, env=env
+    )
 
 
 def make_dataplatform_instance_urn(platform: str, instance: str) -> str:
@@ -82,12 +85,16 @@ def make_dataplatform_instance_urn(platform: str, instance: str) -> str:
 def make_dataset_urn_with_platform_instance(
     platform: str, name: str, platform_instance: Optional[str], env: str = DEFAULT_ENV
 ) -> str:
-    if platform_instance:
-        if DATASET_URN_TO_LOWER:
-            name = name.lower()
-        return f"urn:li:dataset:({make_data_platform_urn(platform)},{platform_instance}.{name},{env})"
-    else:
-        return make_dataset_urn(platform=platform, name=name, env=env)
+    if DATASET_URN_TO_LOWER:
+        name = name.lower()
+    return str(
+        DatasetUrn.create_from_ids(
+            platform_id=platform,
+            table_name=name,
+            env=env,
+            platform_instance=platform_instance,
+        )
+    )
 
 
 def make_schema_field_urn(parent_urn: str, field_path: str) -> str:
@@ -99,8 +106,8 @@ def schema_field_urn_to_key(schema_field_urn: str) -> Optional[SchemaFieldKeyCla
     pattern = r"urn:li:schemaField:\((.*),(.*)\)"
     results = re.search(pattern, schema_field_urn)
     if results is not None:
-        dataset_urn: str = results.group(1)
-        field_path: str = results.group(2)
+        dataset_urn: str = results[1]
+        field_path: str = results[2]
         return SchemaFieldKeyClass(parent=dataset_urn, fieldPath=field_path)
     return None
 
@@ -109,9 +116,7 @@ def dataset_urn_to_key(dataset_urn: str) -> Optional[DatasetKeyClass]:
     pattern = r"urn:li:dataset:\(urn:li:dataPlatform:(.*),(.*),(.*)\)"
     results = re.search(pattern, dataset_urn)
     if results is not None:
-        return DatasetKeyClass(
-            platform=results.group(1), name=results.group(2), origin=results.group(3)
-        )
+        return DatasetKeyClass(platform=results[1], name=results[2], origin=results[3])
     return None
 
 
@@ -123,9 +128,7 @@ def container_new_urn_to_key(dataset_urn: str) -> Optional[ContainerKeyClass]:
     pattern = r"urn:dh:container:0:\((.*)\)"
     results = re.search(pattern, dataset_urn)
     if results is not None:
-        return ContainerKeyClass(
-            guid=results.group(1),
-        )
+        return ContainerKeyClass(guid=results[1])
     return None
 
 
@@ -141,9 +144,7 @@ def container_urn_to_key(guid: str) -> Optional[ContainerKeyClass]:
     pattern = r"urn:li:container:(.*)"
     results = re.search(pattern, guid)
     if results is not None:
-        return ContainerKeyClass(
-            guid=results.group(1),
-        )
+        return ContainerKeyClass(guid=results[1])
     return None
 
 
@@ -151,12 +152,19 @@ def datahub_guid(obj: dict) -> str:
     obj_str = json.dumps(
         pre_json_transform(obj), separators=(",", ":"), sort_keys=True
     ).encode("utf-8")
-    datahub_guid = md5(obj_str).hexdigest()
-    return datahub_guid
+    return md5(obj_str).hexdigest()
 
 
 def make_assertion_urn(assertion_id: str) -> str:
     return f"urn:li:assertion:{assertion_id}"
+
+
+def assertion_urn_to_key(assertion_urn: str) -> Optional[AssertionKeyClass]:
+    pattern = r"urn:li:assertion:(.*)"
+    results = re.search(pattern, assertion_urn)
+    if results is not None:
+        return AssertionKeyClass(assertionId=results[1])
+    return None
 
 
 def make_user_urn(username: str) -> str:
@@ -218,7 +226,6 @@ def make_domain_urn(domain: str) -> str:
 
 
 def make_ml_primary_key_urn(feature_table_name: str, primary_key_name: str) -> str:
-
     return f"urn:li:mlPrimaryKey:({feature_table_name},{primary_key_name})"
 
 
@@ -226,7 +233,6 @@ def make_ml_feature_urn(
     feature_table_name: str,
     feature_name: str,
 ) -> str:
-
     return f"urn:li:mlFeature:({feature_table_name},{feature_name})"
 
 
@@ -250,6 +256,10 @@ def make_ml_model_group_urn(platform: str, group_name: str, env: str) -> str:
 
 def is_valid_ownership_type(ownership_type: Optional[str]) -> bool:
     return ownership_type is not None and ownership_type in [
+        OwnershipTypeClass.TECHNICAL_OWNER,
+        OwnershipTypeClass.BUSINESS_OWNER,
+        OwnershipTypeClass.DATA_STEWARD,
+        OwnershipTypeClass.NONE,
         OwnershipTypeClass.DEVELOPER,
         OwnershipTypeClass.DATAOWNER,
         OwnershipTypeClass.DELEGATE,
@@ -288,10 +298,6 @@ def make_lineage_mce(
         )
     )
     return mce
-
-
-# This bound isn't tight, but it's better than nothing.
-Aspect = TypeVar("Aspect", bound=DictWrapper)
 
 
 def can_add_aspect(mce: MetadataChangeEventClass, AspectType: Type[Aspect]) -> bool:
@@ -359,7 +365,9 @@ def make_global_tag_aspect_with_tag_list(tags: List[str]) -> GlobalTagsClass:
 
 
 def make_ownership_aspect_from_urn_list(
-    owner_urns: List[str], source_type: Optional[Union[str, OwnershipSourceTypeClass]]
+    owner_urns: List[str],
+    source_type: Optional[Union[str, OwnershipSourceTypeClass]],
+    owner_type: Union[str, OwnershipTypeClass] = OwnershipTypeClass.DATAOWNER,
 ) -> OwnershipClass:
     for owner_urn in owner_urns:
         assert owner_urn.startswith("urn:li:corpuser:") or owner_urn.startswith(
@@ -372,7 +380,7 @@ def make_ownership_aspect_from_urn_list(
     owners_list = [
         OwnerClass(
             owner=owner_urn,
-            type=OwnershipTypeClass.DATAOWNER,
+            type=owner_type,
             source=ownership_source_type,
         )
         for owner_urn in owner_urns

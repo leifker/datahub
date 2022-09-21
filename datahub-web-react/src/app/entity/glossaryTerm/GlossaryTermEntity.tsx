@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { BookFilled, BookOutlined } from '@ant-design/icons';
 import { EntityType, GlossaryTerm, SearchResult } from '../../../types.generated';
-import { Entity, IconStyleType, PreviewType } from '../Entity';
+import { Entity, EntityCapabilityType, IconStyleType, PreviewType } from '../Entity';
 import { Preview } from './preview/Preview';
 import { getDataForEntityType } from '../shared/containers/profile/utils';
 import { EntityProfile } from '../shared/containers/profile/EntityProfile';
@@ -14,6 +14,9 @@ import { SidebarOwnerSection } from '../shared/containers/profile/sidebar/Owners
 import { PropertiesTab } from '../shared/tabs/Properties/PropertiesTab';
 import { DocumentationTab } from '../shared/tabs/Documentation/DocumentationTab';
 import { SidebarAboutSection } from '../shared/containers/profile/sidebar/SidebarAboutSection';
+import GlossaryEntitiesPath from '../../glossary/GlossaryEntitiesPath';
+import { EntityMenuItems } from '../shared/EntityDropdown/EntityDropdown';
+import { EntityActionItem } from '../shared/entity/EntityActions';
 
 /**
  * Definition of the DataHub Dataset entity.
@@ -48,7 +51,7 @@ export class GlossaryTermEntity implements Entity<GlossaryTerm> {
 
     isLineageEnabled = () => false;
 
-    getPathName = () => 'glossary';
+    getPathName = () => 'glossaryTerm';
 
     getCollectionName = () => 'Glossary Terms';
 
@@ -60,15 +63,25 @@ export class GlossaryTermEntity implements Entity<GlossaryTerm> {
                 urn={urn}
                 entityType={EntityType.GlossaryTerm}
                 useEntityQuery={useGetGlossaryTermQuery as any}
-                showDeprecateOption
+                headerActionItems={new Set([EntityActionItem.BATCH_ADD_GLOSSARY_TERM])}
+                headerDropdownItems={
+                    new Set([
+                        EntityMenuItems.COPY_URL,
+                        EntityMenuItems.UPDATE_DEPRECATION,
+                        EntityMenuItems.MOVE,
+                        EntityMenuItems.DELETE,
+                    ])
+                }
+                displayGlossaryBrowser
+                isNameEditable
                 tabs={[
-                    {
-                        name: 'Related Entities',
-                        component: GlossaryRelatedEntity,
-                    },
                     {
                         name: 'Documentation',
                         component: DocumentationTab,
+                    },
+                    {
+                        name: 'Related Entities',
+                        component: GlossaryRelatedEntity,
                     },
                     {
                         name: 'Schema',
@@ -101,6 +114,7 @@ export class GlossaryTermEntity implements Entity<GlossaryTerm> {
                     },
                 ]}
                 getOverrideProperties={this.getOverridePropertiesFromEntity}
+                customNavBar={<GlossaryEntitiesPath />}
             />
         );
     };
@@ -116,10 +130,12 @@ export class GlossaryTermEntity implements Entity<GlossaryTerm> {
         return this.renderPreview(PreviewType.SEARCH, result.entity as GlossaryTerm);
     };
 
-    renderPreview = (_: PreviewType, data: GlossaryTerm) => {
+    renderPreview = (previewType: PreviewType, data: GlossaryTerm) => {
         return (
             <Preview
+                previewType={previewType}
                 urn={data?.urn}
+                parentNodes={data.parentNodes}
                 name={this.displayName(data)}
                 description={data?.properties?.description || ''}
                 owners={data?.ownership?.owners}
@@ -141,5 +157,13 @@ export class GlossaryTermEntity implements Entity<GlossaryTerm> {
             entityType: this.type,
             getOverrideProperties: (data) => data,
         });
+    };
+
+    supportedCapabilities = () => {
+        return new Set([
+            EntityCapabilityType.OWNERS,
+            EntityCapabilityType.DEPRECATION,
+            EntityCapabilityType.SOFT_DELETE,
+        ]);
     };
 }

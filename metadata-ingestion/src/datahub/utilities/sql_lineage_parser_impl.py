@@ -1,21 +1,19 @@
+import contextlib
 import logging
 import re
 import unittest
 import unittest.mock
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from sqllineage.core.holders import Column, SQLLineageHolder
 from sqllineage.exceptions import SQLLineageException
 
-try:
+with contextlib.suppress(ImportError):
     import sqlparse
     from networkx import DiGraph
     from sqllineage.core import LineageAnalyzer
 
     import datahub.utilities.sqllineage_patch
-except ImportError:
-    pass
-
 logger = logging.getLogger(__name__)
 
 
@@ -44,8 +42,13 @@ class SqlLineageSQLParserImpl:
             self._ADMIN_SWAP_TOKEN: "admin",
         }
         for replacement, original in self.token_to_original.items():
+            # Replace original tokens with replacement. Since table and column name can contain a hyphen('-'),
+            # also prevent original tokens appearing as part of these names with a hyphen from getting substituted.
             sql_query = re.sub(
-                rf"(\b{original}\b)", rf"{replacement}", sql_query, flags=re.IGNORECASE
+                rf"((?<!-)\b{original}\b)(?!-)",
+                rf"{replacement}",
+                sql_query,
+                flags=re.IGNORECASE,
             )
 
         # SqlLineageParser lowercarese tablenames and we need to replace Looker specific token which should be uppercased
@@ -64,7 +67,8 @@ class SqlLineageSQLParserImpl:
             logger.debug(f"Rewrote original query {original_sql_query} as {sql_query}")
 
         self._sql = sql_query
-
+        self._stmt_holders: Optional[List[LineageAnalyzer]] = None
+        self._sql_holder: Optional[SQLLineageHolder] = None
         try:
             self._stmt = [
                 s
@@ -96,7 +100,10 @@ class SqlLineageSQLParserImpl:
             logger.error(f"SQL lineage analyzer error '{e}' for query: '{self._sql}")
 
     def get_tables(self) -> List[str]:
-        result: List[str] = list()
+        result: List[str] = []
+        if self._sql_holder is None:
+            logger.error("sql holder not present so cannot get tables")
+            return result
         for table in self._sql_holder.source_tables:
             table_normalized = re.sub(r"^<default>.", "", str(table))
             result.append(str(table_normalized))
@@ -115,6 +122,9 @@ class SqlLineageSQLParserImpl:
         return result
 
     def get_columns(self) -> List[str]:
+        if self._sql_holder is None:
+            logger.error("sql holder not present so cannot get columns")
+            return []
         graph: DiGraph = self._sql_holder.graph  # For mypy attribute checking
         column_nodes = [n for n in graph.nodes if isinstance(n, Column)]
         column_graph = graph.subgraph(column_nodes)
@@ -128,12 +138,10 @@ class SqlLineageSQLParserImpl:
                 result.add(str(column.raw_name))
 
         # Reverting back all the previously renamed words which confuses the parser
-        result = set(["date" if c == self._DATE_SWAP_TOKEN else c for c in result])
-        result = set(
-            [
-                "timestamp" if c == self._TIMESTAMP_SWAP_TOKEN else c
-                for c in list(result)
-            ]
-        )
+        result = {"date" if c == self._DATE_SWAP_TOKEN else c for c in result}
+        result = {
+            "timestamp" if c == self._TIMESTAMP_SWAP_TOKEN else c for c in list(result)
+        }
+
         # swap back renamed date column
         return list(result)

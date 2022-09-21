@@ -2,7 +2,7 @@ import * as React from 'react';
 import { CodeSandboxOutlined } from '@ant-design/icons';
 import { MlModelGroup, EntityType, SearchResult, OwnershipType } from '../../../types.generated';
 import { Preview } from './preview/Preview';
-import { Entity, IconStyleType, PreviewType } from '../Entity';
+import { Entity, EntityCapabilityType, IconStyleType, PreviewType } from '../Entity';
 import { getDataForEntityType } from '../shared/containers/profile/utils';
 import { GenericEntityProperties } from '../shared/types';
 import { EntityProfile } from '../shared/containers/profile/EntityProfile';
@@ -13,6 +13,7 @@ import { SidebarTagsSection } from '../shared/containers/profile/sidebar/Sidebar
 import { useGetMlModelGroupQuery } from '../../../graphql/mlModelGroup.generated';
 import ModelGroupModels from './profile/ModelGroupModels';
 import { DocumentationTab } from '../shared/tabs/Documentation/DocumentationTab';
+import { EntityMenuItems } from '../shared/EntityDropdown/EntityDropdown';
 
 /**
  * Definition of the DataHub MlModelGroup entity.
@@ -64,7 +65,7 @@ export class MLModelGroupEntity implements Entity<MlModelGroup> {
             entityType={EntityType.MlmodelGroup}
             useEntityQuery={useGetMlModelGroupQuery}
             getOverrideProperties={this.getOverridePropertiesFromEntity}
-            showDeprecateOption
+            headerDropdownItems={new Set([EntityMenuItems.COPY_URL, EntityMenuItems.UPDATE_DEPRECATION])}
             tabs={[
                 {
                     name: 'Models',
@@ -114,12 +115,12 @@ export class MLModelGroupEntity implements Entity<MlModelGroup> {
             name: entity.name,
             type: EntityType.MlmodelGroup,
             icon: entity.platform?.properties?.logoUrl || undefined,
-            platform: entity.platform?.name,
+            platform: entity.platform,
         };
     };
 
     displayName = (data: MlModelGroup) => {
-        return data.name;
+        return data.name || data.urn;
     };
 
     getGenericEntityProperties = (mlModelGroup: MlModelGroup) => {
@@ -128,5 +129,16 @@ export class MLModelGroupEntity implements Entity<MlModelGroup> {
             entityType: this.type,
             getOverrideProperties: (data) => data,
         });
+    };
+
+    supportedCapabilities = () => {
+        return new Set([
+            EntityCapabilityType.OWNERS,
+            EntityCapabilityType.GLOSSARY_TERMS,
+            EntityCapabilityType.TAGS,
+            EntityCapabilityType.DOMAINS,
+            EntityCapabilityType.DEPRECATION,
+            EntityCapabilityType.SOFT_DELETE,
+        ]);
     };
 }

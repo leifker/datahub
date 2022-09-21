@@ -44,6 +44,7 @@ public class JsonSchemaDataset extends Dataset<JSGraph, JsonSchemaContext, JSEle
         private String uri;
         private String githubOrganization;
         private String slackTeamId;
+        private String subType;
 
         public Builder setGithubOrganization(@Nullable String githubOrganization) {
             this.githubOrganization = githubOrganization;
@@ -81,6 +82,11 @@ public class JsonSchemaDataset extends Dataset<JSGraph, JsonSchemaContext, JSEle
         }
         public Builder setUri(@Nullable String uri) {
             this.uri = uri;
+            return this;
+        }
+
+        public Builder setSubType(@Nullable String subType) {
+            this.subType = subType;
             return this;
         }
 
@@ -129,7 +135,8 @@ public class JsonSchemaDataset extends Dataset<JSGraph, JsonSchemaContext, JSEle
                     )
                     .build();
 
-            return new JsonSchemaDataset(context, graph.getSchemaSource(), datasetVisitor);
+            return new JsonSchemaDataset(context, graph.getSchemaSource(), datasetVisitor)
+                    .setSubType(subType);
         }
     }
 
@@ -145,6 +152,12 @@ public class JsonSchemaDataset extends Dataset<JSGraph, JsonSchemaContext, JSEle
         );
         setFieldVisitor(new FieldVisitor<>(JSField.class));
         setDatasetVisitor(datasetVisitor);
+    }
+
+    @Override
+    public JsonSchemaDataset setSubType(String subType) {
+        super.setSubType(subType);
+        return this;
     }
 
     @Override

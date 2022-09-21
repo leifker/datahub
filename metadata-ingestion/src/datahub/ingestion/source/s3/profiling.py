@@ -1,5 +1,4 @@
 import dataclasses
-from math import log10
 from typing import Any, Dict, List, Optional
 
 import pydantic
@@ -20,8 +19,8 @@ from pydeequ.analyzers import (
 )
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, count, isnan, when
-from pyspark.sql.types import DataType as SparkDataType
 from pyspark.sql.types import (
+    DataType as SparkDataType,
     DateType,
     DecimalType,
     DoubleType,
@@ -48,7 +47,7 @@ from datahub.metadata.schema_classes import (
     QuantileClass,
     ValueFrequencyClass,
 )
-from datahub.telemetry import telemetry
+from datahub.telemetry import stats, telemetry
 
 NUM_SAMPLE_ROWS = 20
 QUANTILES = [0.05, 0.25, 0.5, 0.75, 0.95]
@@ -71,8 +70,8 @@ class DataLakeProfilerConfig(ConfigModel):
         description="Whether to perform profiling at table-level only or include column-level profiling as well.",
     )
 
-    allow_deny_patterns: AllowDenyPattern = Field(
-        default=AllowDenyPattern.allow_all(), description=""
+    _allow_deny_patterns: AllowDenyPattern = pydantic.PrivateAttr(
+        default=AllowDenyPattern.allow_all(),
     )
 
     max_number_of_fields_to_profile: Optional[pydantic.PositiveInt] = Field(
@@ -210,7 +209,7 @@ class _SingleTableProfiler:
         # get column distinct counts
         for column in dataframe.columns:
 
-            if not self.profiling_config.allow_deny_patterns.allowed(column):
+            if not self.profiling_config._allow_deny_patterns.allowed(column):
                 self.ignored_columns.append(column)
                 continue
 
@@ -274,7 +273,8 @@ class _SingleTableProfiler:
         )
         column_null_counts = null_counts.toPandas().T[0].to_dict()
         column_null_fractions = {
-            c: column_null_counts[c] / self.row_count for c in self.columns_to_profile
+            c: column_null_counts[c] / self.row_count if self.row_count != 0 else 0
+            for c in self.columns_to_profile
         }
         column_nonnull_counts = {
             c: self.row_count - column_null_counts[c] for c in self.columns_to_profile
@@ -358,8 +358,7 @@ class _SingleTableProfiler:
 
         telemetry.telemetry_instance.ping(
             "profile_data_lake_table",
-            # bucket by taking floor of log of the number of rows scanned
-            {"rows_profiled": 10 ** int(log10(row_count + 1))},
+            {"rows_profiled": stats.discretize(row_count)},
         )
 
         # loop through the columns and add the analyzers

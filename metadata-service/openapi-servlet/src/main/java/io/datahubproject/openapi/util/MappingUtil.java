@@ -14,12 +14,11 @@ import com.linkedin.data.DataMap;
 import com.linkedin.data.template.RecordTemplate;
 import com.linkedin.entity.Aspect;
 import com.linkedin.events.metadata.ChangeType;
-import com.linkedin.metadata.Constants;
 import com.linkedin.metadata.entity.EntityService;
 import com.linkedin.metadata.entity.RollbackRunResult;
 import com.linkedin.metadata.entity.ValidationException;
 import com.linkedin.metadata.models.EntitySpec;
-import com.linkedin.metadata.resources.entity.AspectUtils;
+import com.linkedin.metadata.entity.AspectUtils;
 import com.linkedin.metadata.utils.metrics.MetricUtils;
 import com.linkedin.mxe.GenericAspect;
 import com.linkedin.mxe.SystemMetadata;
@@ -246,13 +245,13 @@ public class MappingUtil {
     }
   }
 
-  public static Pair<String, Boolean> ingestProposal(MetadataChangeProposal metadataChangeProposal, EntityService entityService,
+  public static Pair<String, Boolean> ingestProposal(MetadataChangeProposal metadataChangeProposal, String actorUrn, EntityService entityService,
       ObjectMapper objectMapper) {
     // TODO: Use the actor present in the IC.
     Timer.Context context = MetricUtils.timer("postEntity").time();
     final com.linkedin.common.AuditStamp auditStamp =
         new com.linkedin.common.AuditStamp().setTime(System.currentTimeMillis())
-            .setActor(UrnUtils.getUrn(Constants.UNKNOWN_ACTOR));
+            .setActor(UrnUtils.getUrn(actorUrn));
     io.datahubproject.openapi.generated.KafkaAuditHeader auditHeader = metadataChangeProposal.getAuditHeader();
 
     com.linkedin.mxe.MetadataChangeProposal serviceProposal =

@@ -1,11 +1,9 @@
 import React, { useEffect } from 'react';
-import { Alert } from 'antd';
 import { useParams } from 'react-router-dom';
 import { EntityType } from '../../types.generated';
 import { BrowsableEntityPage } from '../browse/BrowsableEntityPage';
 import LineageExplorer from '../lineage/LineageExplorer';
 import useIsLineageMode from '../lineage/utils/useIsLineageMode';
-import { SearchablePage } from '../search/SearchablePage';
 import { useEntityRegistry } from '../useEntityRegistry';
 import analytics, { EventType } from '../analytics';
 import { decodeUrn } from './shared/utils';
@@ -13,6 +11,7 @@ import { useGetAuthenticatedUserUrn } from '../useGetAuthenticatedUser';
 import { useGetGrantedPrivilegesQuery } from '../../graphql/policy.generated';
 import { Message } from '../shared/Message';
 import { UnauthorizedPage } from '../authorization/UnauthorizedPage';
+import { ErrorSection } from '../shared/error/ErrorSection';
 
 interface RouteParams {
     urn: string;
@@ -32,7 +31,6 @@ export const EntityPage = ({ entityType }: Props) => {
     const entity = entityRegistry.getEntity(entityType);
     const isBrowsable = entity.isBrowseEnabled();
     const isLineageSupported = entity.isLineageEnabled();
-    const ContainerPage = isBrowsable || isLineageSupported ? BrowsableEntityPage : SearchablePage;
     const isLineageMode = useIsLineageMode();
     const authenticatedUserUrn = useGetAuthenticatedUserUrn();
     const { loading, error, data } = useGetGrantedPrivilegesQuery({
@@ -65,16 +63,17 @@ export const EntityPage = ({ entityType }: Props) => {
         entityType === EntityType.MlprimaryKey ||
         entityType === EntityType.MlfeatureTable ||
         entityType === EntityType.MlmodelGroup ||
-        entityType === EntityType.GlossaryTerm;
+        entityType === EntityType.GlossaryTerm ||
+        entityType === EntityType.GlossaryNode;
 
     return (
         <>
             {loading && <Message type="loading" content="Loading..." style={{ marginTop: '10%' }} />}
-            {error && <Alert type="error" message={error?.message || `Failed to fetch privileges for user`} />}
+            {error && <ErrorSection />}
             {data && !canViewEntityPage && <UnauthorizedPage />}
             {canViewEntityPage &&
-                ((showNewPage && <SearchablePage>{entityRegistry.renderProfile(entityType, urn)}</SearchablePage>) || (
-                    <ContainerPage
+                ((showNewPage && <>{entityRegistry.renderProfile(entityType, urn)}</>) || (
+                    <BrowsableEntityPage
                         isBrowsable={isBrowsable}
                         urn={urn}
                         type={entityType}
@@ -85,7 +84,7 @@ export const EntityPage = ({ entityType }: Props) => {
                         ) : (
                             entityRegistry.renderProfile(entityType, urn)
                         )}
-                    </ContainerPage>
+                    </BrowsableEntityPage>
                 ))}
         </>
     );

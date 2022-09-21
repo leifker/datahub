@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from hashlib import md5
-from typing import Iterable, List, Optional, Tuple, cast
+from typing import Iterable, List, Optional, Tuple
 
 import requests
 
@@ -27,10 +27,11 @@ from datahub.ingestion.api.decorators import (
 )
 from datahub.ingestion.api.workunit import MetadataWorkUnit
 from datahub.ingestion.extractor import schema_util
-from datahub.ingestion.source.state.checkpoint import Checkpoint
 from datahub.ingestion.source.state.kafka_state import KafkaCheckpointState
+from datahub.ingestion.source.state.stale_entity_removal_handler import (
+    StaleEntityRemovalHandler,
+)
 from datahub.ingestion.source.state.stateful_ingestion_base import (
-    JobId,
     StatefulIngestionSourceBase,
 )
 from datahub.ingestion.source_config.pulsar import PulsarSourceConfig
@@ -46,7 +47,6 @@ from datahub.metadata.schema_classes import (
     ChangeTypeClass,
     DataPlatformInstanceClass,
     DatasetPropertiesClass,
-    JobStatusClass,
     SubTypesClass,
 )
 
@@ -98,16 +98,17 @@ class PulsarSource(StatefulIngestionSourceBase):
         self.platform: str = "pulsar"
         self.config: PulsarSourceConfig = config
         self.report: PulsarSourceReport = PulsarSourceReport()
-        self.base_url: str = self.config.web_service_url + "/admin/v2"
-        self.tenants: List[str] = config.tenants
+        # Create and register the stateful ingestion use-case handlers.
+        self.stale_entity_removal_handler = StaleEntityRemovalHandler(
+            source=self,
+            config=self.config,
+            state_type_class=KafkaCheckpointState,
+            pipeline_name=self.ctx.pipeline_name,
+            run_id=self.ctx.run_id,
+        )
 
-        if (
-            self.is_stateful_ingestion_configured()
-            and not self.config.platform_instance
-        ):
-            raise ConfigurationError(
-                "Enabling Pulsar stateful ingestion requires to specify a platform instance."
-            )
+        self.base_url: str = f"{self.config.web_service_url}/admin/v2"
+        self.tenants: List[str] = config.tenants
 
         self.session = requests.Session()
         self.session.verify = self.config.verify_ssl
@@ -120,7 +121,7 @@ class PulsarSource(StatefulIngestionSourceBase):
         if self._is_oauth_authentication_configured():
             # Get OpenId configuration from issuer, e.g. token_endpoint
             oid_config_url = (
-                "%s/.well-known/openid-configuration" % self.config.issuer_url
+                f"{self.config.issuer_url}/.well-known/openid-configuration"
             )
             oid_config_response = requests.get(
                 oid_config_url, verify=False, allow_redirects=False
@@ -130,8 +131,7 @@ class PulsarSource(StatefulIngestionSourceBase):
                 self.config.oid_config.update(oid_config_response.json())
             else:
                 logger.error(
-                    "Unexpected response while getting discovery document using %s : %s"
-                    % (oid_config_url, oid_config_response)
+                    f"Unexpected response while getting discovery document using {oid_config_url} : {oid_config_response}"
                 )
 
             if "token_endpoint" not in self.config.oid_config:
@@ -220,37 +220,6 @@ class PulsarSource(StatefulIngestionSourceBase):
                 f"An ambiguous exception occurred while handling the request: {e}"
             )
 
-    def is_checkpointing_enabled(self, job_id: JobId) -> bool:
-        return job_id == (
-            self.get_default_ingestion_job_id()
-            and self.is_stateful_ingestion_configured()
-            and self.config.stateful_ingestion
-            and self.config.stateful_ingestion.remove_stale_metadata
-        )
-
-    def get_default_ingestion_job_id(self) -> JobId:
-        """
-        Default ingestion job name that kafka provides.
-        """
-        return JobId("ingest_from_pulsar_source")
-
-    def create_checkpoint(self, job_id: JobId) -> Optional[Checkpoint]:
-        """
-        Create a custom checkpoint with empty state for the job.
-        """
-        assert self.ctx.pipeline_name is not None
-        if job_id == self.get_default_ingestion_job_id():
-            return Checkpoint(
-                job_name=job_id,
-                pipeline_name=self.ctx.pipeline_name,
-                platform_instance_id=self.get_platform_instance_id(),
-                run_id=self.ctx.run_id,
-                config=self.config,
-                # TODO Create a PulsarCheckpointState ?
-                state=KafkaCheckpointState(),
-            )
-        return None
-
     def get_platform_instance_id(self) -> str:
         assert self.config.platform_instance is not None
         return self.config.platform_instance
@@ -264,45 +233,6 @@ class PulsarSource(StatefulIngestionSourceBase):
             config.topic_patterns.deny.append(r".*-partition-[0-9]+")
 
         return cls(config, ctx)
-
-    def soft_delete_dataset(self, urn: str, type: str) -> Iterable[MetadataWorkUnit]:
-        logger.debug(f"Soft-deleting stale entity of type {type} - {urn}.")
-        mcp = MetadataChangeProposalWrapper(
-            entityType="dataset",
-            entityUrn=urn,
-            changeType=ChangeTypeClass.UPSERT,
-            aspectName="status",
-            aspect=StatusClass(removed=True),
-        )
-        wu = MetadataWorkUnit(id=f"soft-delete-{type}-{urn}", mcp=mcp)
-        self.report.report_workunit(wu)
-        self.report.report_stale_entity_soft_deleted(urn)
-        yield wu
-
-    def gen_removed_entity_workunits(self) -> Iterable[MetadataWorkUnit]:
-        last_checkpoint = self.get_last_checkpoint(
-            self.get_default_ingestion_job_id(), KafkaCheckpointState
-        )
-        cur_checkpoint = self.get_current_checkpoint(
-            self.get_default_ingestion_job_id()
-        )
-        if (
-            self.config.stateful_ingestion
-            and self.config.stateful_ingestion.remove_stale_metadata
-            and last_checkpoint is not None
-            and last_checkpoint.state is not None
-            and cur_checkpoint is not None
-            and cur_checkpoint.state is not None
-        ):
-            logger.debug("Checking for stale entity removal.")
-
-            last_checkpoint_state = cast(KafkaCheckpointState, last_checkpoint.state)
-            cur_checkpoint_state = cast(KafkaCheckpointState, cur_checkpoint.state)
-
-            for topic_urn in last_checkpoint_state.get_topic_urns_not_in(
-                cur_checkpoint_state
-            ):
-                yield from self.soft_delete_dataset(topic_urn, "topic")
 
     def get_workunits(self) -> Iterable[MetadataWorkUnit]:
         """
@@ -325,15 +255,14 @@ class PulsarSource(StatefulIngestionSourceBase):
         # Report the Pulsar broker version we are communicating with
         self.report.report_pulsar_version(
             self.session.get(
-                "%s/brokers/version" % self.base_url,
-                timeout=self.config.timeout,
+                f"{self.base_url}/brokers/version", timeout=self.config.timeout
             ).text
         )
 
         # If no tenants are provided, request all tenants from cluster using /admin/v2/tenants endpoint.
         # Requesting cluster tenant information requires superuser privileges
         if not self.tenants:
-            self.tenants = self._get_pulsar_metadata(self.base_url + "/tenants") or []
+            self.tenants = self._get_pulsar_metadata(f"{self.base_url}/tenants") or []
 
         # Initialize counters
         self.report.tenants_scanned = 0
@@ -346,9 +275,10 @@ class PulsarSource(StatefulIngestionSourceBase):
                 # Get namespaces belonging to a tenant, /admin/v2/%s/namespaces
                 # A tenant admin role has sufficient privileges to perform this action
                 namespaces = (
-                    self._get_pulsar_metadata(self.base_url + "/namespaces/%s" % tenant)
+                    self._get_pulsar_metadata(f"{self.base_url}/namespaces/{tenant}")
                     or []
                 )
+
                 for namespace in namespaces:
                     self.report.namespaces_scanned += 1
                     if self.config.namespace_patterns.allowed(namespace):
@@ -375,45 +305,29 @@ class PulsarSource(StatefulIngestionSourceBase):
 
                                 yield from self._extract_record(topic, is_partitioned)
                                 # Add topic to checkpoint if stateful ingestion is enabled
-                                if self.is_stateful_ingestion_configured():
-                                    self._add_topic_to_checkpoint(topic)
+                                topic_urn = make_dataset_urn_with_platform_instance(
+                                    platform=self.platform,
+                                    name=topic,
+                                    platform_instance=self.config.platform_instance,
+                                    env=self.config.env,
+                                )
+                                self.stale_entity_removal_handler.add_entity_to_state(
+                                    type="topic", urn=topic_urn
+                                )
                             else:
                                 self.report.report_topics_dropped(topic)
-
-                        if self.is_stateful_ingestion_configured():
-                            # Clean up stale entities.
-                            yield from self.gen_removed_entity_workunits()
-
                     else:
                         self.report.report_namespaces_dropped(namespace)
             else:
                 self.report.report_tenants_dropped(tenant)
-
-    def _add_topic_to_checkpoint(self, topic: str) -> None:
-        cur_checkpoint = self.get_current_checkpoint(
-            self.get_default_ingestion_job_id()
-        )
-
-        if cur_checkpoint is not None:
-            checkpoint_state = cast(KafkaCheckpointState, cur_checkpoint.state)
-            checkpoint_state.add_topic_urn(
-                make_dataset_urn_with_platform_instance(
-                    platform=self.platform,
-                    name=topic,
-                    platform_instance=self.config.platform_instance,
-                    env=self.config.env,
-                )
-            )
+        # Clean up stale entities.
+        yield from self.stale_entity_removal_handler.gen_removed_entity_workunits()
 
     def _is_token_authentication_configured(self) -> bool:
-        if self.config.token is not None:
-            return True
-        return False
+        return self.config.token is not None
 
     def _is_oauth_authentication_configured(self) -> bool:
-        if self.config.issuer_url is not None:
-            return True
-        return False
+        return self.config.issuer_url is not None
 
     def _get_schema_and_fields(
         self, pulsar_topic: PulsarTopic, is_key_schema: bool
@@ -421,10 +335,9 @@ class PulsarSource(StatefulIngestionSourceBase):
 
         pulsar_schema: Optional[PulsarSchema] = None
 
-        schema_url = self.base_url + "/schemas/%s/%s/%s/schema" % (
-            pulsar_topic.tenant,
-            pulsar_topic.namespace,
-            pulsar_topic.topic,
+        schema_url = (
+            self.base_url
+            + f"/schemas/{pulsar_topic.tenant}/{pulsar_topic.namespace}/{pulsar_topic.topic}/schema"
         )
 
         schema_payload = self._get_pulsar_metadata(schema_url)
@@ -449,7 +362,7 @@ class PulsarSource(StatefulIngestionSourceBase):
     ) -> List[SchemaField]:
         # Parse the schema and convert it to SchemaFields.
         fields: List[SchemaField] = []
-        if schema.schema_type == "AVRO" or schema.schema_type == "JSON":
+        if schema.schema_type in ["AVRO", "JSON"]:
             # Extract fields from schema and get the FQN for the schema
             fields = schema_util.avro_schema_to_mce_fields(
                 schema.schema_str, is_key_schema=is_key_schema
@@ -465,6 +378,7 @@ class PulsarSource(StatefulIngestionSourceBase):
         self, pulsar_topic: PulsarTopic, platform_urn: str
     ) -> Tuple[Optional[PulsarSchema], Optional[SchemaMetadata]]:
 
+        # FIXME: Type annotations are not working for this function.
         schema, fields = self._get_schema_and_fields(
             pulsar_topic=pulsar_topic, is_key_schema=False
         )  # type: Tuple[Optional[PulsarSchema], List[SchemaField]]
@@ -637,19 +551,6 @@ class PulsarSource(StatefulIngestionSourceBase):
     def get_report(self):
         return self.report
 
-    def update_default_job_run_summary(self) -> None:
-        summary = self.get_job_run_summary(self.get_default_ingestion_job_id())
-        if summary is not None:
-            # For now just add the config and the report.
-            summary.config = self.config.json()
-            summary.custom_summary = self.report.as_string()
-            summary.runStatus = (
-                JobStatusClass.FAILED
-                if self.get_report().failures
-                else JobStatusClass.COMPLETED
-            )
-
     def close(self):
-        self.update_default_job_run_summary()
         self.prepare_for_commit()
         self.session.close()

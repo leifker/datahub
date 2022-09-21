@@ -2,9 +2,8 @@
 import json
 from typing import List, Optional
 
-from datahub.configuration.common import ConfigModel
+from datahub.configuration.common import ConfigModel, TransformerSemantics
 from datahub.ingestion.api.common import PipelineContext
-from datahub.ingestion.transformer.add_dataset_ownership import Semantics
 from datahub.ingestion.transformer.base_transformer import (
     BaseTransformer,
     SingleAspectTransformer,
@@ -18,7 +17,7 @@ from datahub.metadata.schema_classes import (
 
 class AddCustomOwnershipConfig(ConfigModel):
     owners_json: str
-    semantics: Semantics = Semantics.OVERWRITE
+    semantics: TransformerSemantics = TransformerSemantics.OVERWRITE
 
 
 class AddCustomOwnership(BaseTransformer, SingleAspectTransformer):
@@ -30,6 +29,7 @@ class AddCustomOwnership(BaseTransformer, SingleAspectTransformer):
     config: AddCustomOwnershipConfig
 
     def __init__(self, config: AddCustomOwnershipConfig, ctx: PipelineContext):
+        super().__init__()
         self.ctx = ctx
         self.config = config
 
@@ -60,13 +60,10 @@ class AddCustomOwnership(BaseTransformer, SingleAspectTransformer):
         assert aspect is None or isinstance(aspect, OwnershipClass)
 
         if owners_to_add:
-            ownership = (
-                aspect
-                if aspect
-                else OwnershipClass(
-                    owners=[],
-                )
+            ownership = aspect or OwnershipClass(
+                owners=[],
             )
+
             ownership.owners.extend(owners_to_add)
 
         return ownership

@@ -49,6 +49,7 @@ public class ProtobufDataset extends Dataset<ProtobufGraph, ProtobufContext, Pro
         private String schema;
         private String githubOrganization;
         private String slackTeamId;
+        private String subType;
 
         public Builder setGithubOrganization(@Nullable String githubOrganization) {
             this.githubOrganization = githubOrganization;
@@ -103,6 +104,11 @@ public class ProtobufDataset extends Dataset<ProtobufGraph, ProtobufContext, Pro
             return this;
         }
 
+        public Builder setSubType(@Nullable String subType) {
+            this.subType = subType;
+            return this;
+        }
+
         public ProtobufDataset build() throws IOException {
             FileDescriptorSet fileSet = FileDescriptorSet.parseFrom(this.protocBytes);
             ProtobufGraph graph = new ProtobufGraph(fileSet, this.messageName, this.filename);
@@ -150,7 +156,8 @@ public class ProtobufDataset extends Dataset<ProtobufGraph, ProtobufContext, Pro
                     )
                     .build();
 
-            return new ProtobufDataset(context, schema, datasetVisitor);
+            return new ProtobufDataset(context, schema, datasetVisitor)
+                    .setSubType(subType);
         }
     }
 
@@ -164,6 +171,12 @@ public class ProtobufDataset extends Dataset<ProtobufGraph, ProtobufContext, Pro
         );
         setFieldVisitor(new ProtobufExtensionFieldVisitor());
         setDatasetVisitor(datasetVisitor);
+    }
+
+    @Override
+    public ProtobufDataset setSubType(String subType) {
+        super.setSubType(subType);
+        return this;
     }
 
     @Override

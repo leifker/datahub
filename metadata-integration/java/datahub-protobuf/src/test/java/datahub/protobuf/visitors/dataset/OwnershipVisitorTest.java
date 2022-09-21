@@ -26,17 +26,17 @@ public class OwnershipVisitorTest {
         OwnershipVisitor test = new OwnershipVisitor();
 
         assertEquals(Set.of(new Owner()
-                                .setType(OwnershipType.PRODUCER)
+                                .setType(OwnershipType.TECHNICAL_OWNER)
                                 .setSource(new OwnershipSource().setType(OwnershipSourceType.MANUAL))
-                                .setOwner(Urn.createFromTuple("corpgroup", "teamb")),
+                                .setOwner(Urn.createFromTuple("corpGroup", "teamb")),
                         new Owner()
-                                .setType(OwnershipType.PRODUCER)
+                                .setType(OwnershipType.TECHNICAL_OWNER)
                                 .setSource(new OwnershipSource().setType(OwnershipSourceType.MANUAL))
                                 .setOwner(Urn.createFromTuple("corpuser", "datahub")),
                         new Owner()
                                 .setType(OwnershipType.TECHNICAL_OWNER)
                                 .setSource(new OwnershipSource().setType(OwnershipSourceType.MANUAL))
-                                .setOwner(Urn.createFromTuple("corpgroup", "technicalowner"))
+                                .setOwner(Urn.createFromTuple("corpGroup", "technicalowner"))
                 ),
                 context.accept(List.of(test)).collect(Collectors.toSet()));
     }

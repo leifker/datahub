@@ -10,6 +10,7 @@ authentication:
       configs:
         # Key used to validate incoming tokens. Should typically be the same as authentication.tokenService.signingKey
         signingKey: ${DATAHUB_TOKEN_SERVICE_SIGNING_KEY:WnEdIeTG/VVCLQqGwC/BAkqyY0k+H8NEAtWGejrBI94=}
+        salt: ${DATAHUB_TOKEN_SERVICE_SALT:ohDVbJBvHHVJh9S/UA4BYF9COuNnqqVhr9MLKEGXk1O=}
 
   # Required separately from the DataHubTokenAuthenticator as this is used by the AuthServiceController to authorize token generation
   # at user login time.
@@ -20,6 +21,7 @@ authentication:
   tokenService:
     # Key used to sign new tokens.
     signingKey: ${DATAHUB_TOKEN_SERVICE_SIGNING_KEY:WnEdIeTG/VVCLQqGwC/BAkqyY0k+H8NEAtWGejrBI94=}
+    salt: ${DATAHUB_TOKEN_SERVICE_SALT:ohDVbJBvHHVJh9S/UA4BYF9COuNnqqVhr9MLKEGXk1O=}
 
   # The max duration of a UI session in milliseconds. Defaults to 1 day.
   sessionTokenDurationMs: ${SESSION_TOKEN_DURATION_MS:86400000}
@@ -34,26 +36,30 @@ authorization:
 
   # Optional: A set of custom authorizers, serving in addition to the default DataHub policies-based authorizer.
   authorizers:
-  # - type: com.datahub.authorization.authorizer.CustomAuthorizer
-  #   configs:
-  #     config1: value1
+    - type: com.datahub.authorization.ranger.RangerAuthorizer
+      enabled: ${RANGER_AUTHORIZER_ENABLED:false}
+      configs:
+        username: ${RANGER_USERNAME}
+        password: ${RANGER_PASSWORD}
 
 ingestion:
   enabled: ${UI_INGESTION_ENABLED:true}
-  defaultCliVersion: '${UI_INGESTION_DEFAULT_CLI_VERSION:0.8.34.1}'
+  defaultCliVersion: '${UI_INGESTION_DEFAULT_CLI_VERSION:0.8.42}'
 
 telemetry:
   enabledCli: ${CLI_TELEMETRY_ENABLED:true}
   enabledIngestion: ${INGESTION_REPORTING_ENABLED:false}
   enableThirdPartyLogging: ${ENABLE_THIRD_PARTY_LOGGING:false}
+  enabledServer: ${DATAHUB_TELEMETRY_ENABLED:true}
 
 secretService:
   encryptionKey: ${SECRET_SERVICE_ENCRYPTION_KEY:ENCRYPTION_KEY}
 
 datahub:
+  serverType: ${DATAHUB_SERVER_TYPE:prod}
   gms:
-    host: ${DATAHUB_GMS_HOST:${GMS_HOST:localhost}}
-    port: ${DATAHUB_GMS_PORT:${GMS_PORT:8080}}
+    host: ${DATAHUB_GMS_HOST:localhost}
+    port: ${DATAHUB_GMS_PORT:8080}
     useSSL: ${DATAHUB_GMS_USE_SSL:${GMS_USE_SSL:false}}
     sslContext:
       protocol: ${DATAHUB_GMS_SSL_PROTOCOL:${GMS_SSL_PROTOCOL:#{null}}}
@@ -67,7 +73,7 @@ datahub:
 entityService:
   impl: ${ENTITY_SERVICE_IMPL:ebean}
   retention:
-    enabled: ${ENTITY_SERVICE_ENABLE_RETENTION:false}
+    enabled: ${ENTITY_SERVICE_ENABLE_RETENTION:true}
 
 graphService:
   type: ${GRAPH_SERVICE_IMPL:elasticsearch}
@@ -81,13 +87,16 @@ configEntityRegistry:
   path: ${ENTITY_REGISTRY_CONFIG_PATH:../../metadata-models/src/main/resources/entity-registry.yml}
 
 platformAnalytics:
-  enabled: ${ANALYTICS_ENABLED:true}
+  enabled: ${DATAHUB_ANALYTICS_ENABLED:true}
 
 visualConfig:
   assets:
-    logoUrl: ${REACT_APP_LOGO_URL:#{null}}
+    logoUrl: ${REACT_APP_LOGO_URL:/assets/platforms/datahublogo.png}
+    faviconUrl: ${REACT_APP_FAVICON_URL:/assets/favicon.ico}
 
 # Storage Layer
+
+# Only required if entityService.impl is ebean
 ebean:
   username: ${EBEAN_DATASOURCE_USERNAME:datahub}
   password: ${EBEAN_DATASOURCE_PASSWORD:datahub}
@@ -101,6 +110,7 @@ ebean:
   waitTimeoutMillis: ${EBEAN_WAIT_TIMEOUT_MILLIS:1000}
   autoCreateDdl: ${EBEAN_AUTOCREATE:false}
 
+# Only required if entityService.impl is cassandra
 cassandra:
   datasourceUsername: ${CASSANDRA_DATASOURCE_USERNAME:cassandra}
   datasourcePassword: ${CASSANDRA_DATASOURCE_PASSWORD:cassandra}
@@ -138,8 +148,9 @@ elasticsearch:
     prefix: ${INDEX_PREFIX:}
     numShards: ${ELASTICSEARCH_NUM_SHARDS_PER_INDEX:1}
     numReplicas: ${ELASTICSEARCH_NUM_REPLICAS_PER_INDEX:1}
-    numRetries: ${ELASTICSEARCH_INDEX_BUILDER_NUM_RETRIES :3}
+    numRetries: ${ELASTICSEARCH_INDEX_BUILDER_NUM_RETRIES:3}
     maxArrayLength: ${SEARCH_DOCUMENT_MAX_ARRAY_LENGTH:1000}
+    maxObjectKeys: ${SEARCH_DOCUMENT_MAX_OBJECT_KEYS:1000}
     mainTokenizer: ${ELASTICSEARCH_MAIN_TOKENIZER:#{null}}
 
 # TODO: Kafka topic convention
@@ -153,6 +164,10 @@ kafka:
     awsGlue:
       region: ${AWS_GLUE_SCHEMA_REGISTRY_REGION:us-east-1}
       registryName: ${AWS_GLUE_SCHEMA_REGISTRY_NAME:#{null}}
+  schema:
+    registry:
+      security:
+        protocol: ${KAFKA_PROPERTIES_SECURITY_PROTOCOL:PLAINTEXT}
 
 # Only required if GraphService type is neo4j
 neo4j:
@@ -169,7 +184,26 @@ spring:
   mvc:
     servlet:
       path: /openapi
+  kafka:
+    security:
+      protocol: ${KAFKA_PROPERTIES_SECURITY_PROTOCOL:PLAINTEXT}
 
 springdoc:
   cache:
     disabled: true
+
+metadataTests:
+  enabled: ${METADATA_TESTS_ENABLED:false}
+
+siblings:
+  enabled: ${ENABLE_SIBLING_HOOK:true} # enable to turn on automatic sibling associations for dbt
+
+bootstrap:
+  upgradeDefaultBrowsePaths:
+    enabled: ${UPGRADE_DEFAULT_BROWSE_PATHS_ENABLED:false} # enable to run the upgrade to migrate legacy default browse paths to new ones
+
+featureFlags:
+  showSimplifiedHomepageByDefault: ${SHOW_SIMPLIFIED_HOMEPAGE_BY_DEFAULT:false} # shows a simplified homepage with just datasets, charts and dashboards by default to users. this can be configured in user settings
+
+entityChangeEvents:
+  enabled: ${ENABLE_ENTITY_CHANGE_EVENTS_HOOK:true}

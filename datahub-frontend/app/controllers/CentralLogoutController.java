@@ -1,6 +1,8 @@
 package controllers;
 
 import com.typesafe.config.Config;
+import java.net.URLEncoder;
+import lombok.extern.slf4j.Slf4j;
 import org.pac4j.play.LogoutController;
 import play.mvc.Result;
 
@@ -10,6 +12,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * Responsible for handling logout logic with oidc providers
  */
+@Slf4j
 public class CentralLogoutController extends LogoutController {
 
   private static final String AUTH_BASE_URL_CONFIG_PATH = "auth.baseUrl";
@@ -19,14 +22,14 @@ public class CentralLogoutController extends LogoutController {
   @Inject
   public CentralLogoutController(Config config) {
 
-    String _authBaseUrl = config.hasPath(AUTH_BASE_URL_CONFIG_PATH)
+    String authBaseUrl = config.hasPath(AUTH_BASE_URL_CONFIG_PATH)
             ? config.getString(AUTH_BASE_URL_CONFIG_PATH)
             : DEFAULT_BASE_URL_PATH;
 
     _isOidcEnabled = config.hasPath("auth.oidc.enabled") && config.getBoolean("auth.oidc.enabled");
 
-    setDefaultUrl(_authBaseUrl);
-    setLogoutUrlPattern(_authBaseUrl + ".*");
+    setDefaultUrl(authBaseUrl);
+    setLogoutUrlPattern(authBaseUrl + ".*");
     setLocalLogout(true);
     setCentralLogout(true);
 
@@ -37,7 +40,15 @@ public class CentralLogoutController extends LogoutController {
    */
   public Result executeLogout() throws ExecutionException, InterruptedException {
     if (_isOidcEnabled) {
-      return logout().toCompletableFuture().get();
+      try {
+        return logout().toCompletableFuture().get();
+      } catch (Exception e) {
+        log.error("Caught exception while attempting to perform SSO logout! It's likely that SSO integration is mis-configured.", e);
+        return redirect(
+            String.format("/login?error_msg=%s",
+                URLEncoder.encode("Failed to sign out using Single Sign-On provider. Please contact your DataHub Administrator, "
+                    + "or refer to server logs for more information.")));
+      }
     }
     return redirect("/");
   }

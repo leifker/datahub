@@ -2,7 +2,7 @@ package com.linkedin.gms.factory.auth;
 
 import com.datahub.authentication.Authentication;
 import com.datahub.authorization.DataHubAuthorizer;
-import com.linkedin.entity.client.JavaEntityClient;
+import com.linkedin.metadata.client.JavaEntityClient;
 import com.linkedin.gms.factory.entity.RestliEntityClientFactory;
 import com.linkedin.gms.factory.spring.YamlPropertySourceFactory;
 import javax.annotation.Nonnull;
@@ -32,7 +32,7 @@ public class DataHubAuthorizerFactory {
   @Value("${authorization.defaultAuthorizer.cacheRefreshIntervalSecs}")
   private Integer policyCacheRefreshIntervalSeconds;
 
-  @Value("${authorization.defaultAuthorizer..enabled:true}")
+  @Value("${authorization.defaultAuthorizer.enabled:true}")
   private Boolean policiesEnabled;
 
   @Bean(name = "dataHubAuthorizer")

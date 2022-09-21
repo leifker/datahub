@@ -4,10 +4,10 @@ from functools import lru_cache
 from typing import Dict, Iterable, Optional, Tuple, Union
 
 import dateutil.parser as dp
+import pydantic
 import requests
 import tenacity
-from pydantic import validator
-from pydantic.fields import Field
+from pydantic import Field, validator
 from requests.models import HTTPBasicAuth, HTTPError
 from sqllineage.runner import LineageRunner
 from tenacity import retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -68,8 +68,10 @@ class ModeConfig(DatasetLineageProviderConfigBase):
     connect_uri: str = Field(
         default="https://app.mode.com", description="Mode host URL."
     )
-    token: str = Field(default=None, description="Mode user token.")
-    password: str = Field(default=None, description="Mode password for authentication.")
+    token: Optional[str] = Field(default=None, description="Mode user token.")
+    password: Optional[pydantic.SecretStr] = Field(
+        default=None, description="Mode password for authentication."
+    )
     workspace: Optional[str] = Field(default=None, description="")
     default_schema: str = Field(
         default="public",
@@ -168,7 +170,10 @@ class ModeSource(Source):
         self.report = SourceReport()
 
         self.session = requests.session()
-        self.session.auth = HTTPBasicAuth(self.config.token, self.config.password)
+        self.session.auth = HTTPBasicAuth(
+            self.config.token,
+            self.config.password.get_secret_value() if self.config.password else None,
+        )
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
@@ -200,6 +205,9 @@ class ModeSource(Source):
             aspects=[],
         )
 
+        title = report_info.get("name", "") or ""
+        description = report_info.get("description", "") or ""
+
         last_modified = ChangeAuditStamps()
         creator = self._get_creator(
             report_info.get("_links", {}).get("creator", {}).get("href", "")
@@ -213,8 +221,6 @@ class ModeSource(Source):
             created_ts = int(
                 dp.parse(f"{report_info.get('created_at', 'now')}").timestamp() * 1000
             )
-            title = report_info.get("name", "") or ""
-            description = report_info.get("description", "") or ""
             last_modified = ChangeAuditStamps(
                 created=AuditStamp(time=created_ts, actor=modified_actor),
                 lastModified=AuditStamp(time=modified_ts, actor=modified_actor),

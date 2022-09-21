@@ -136,6 +136,11 @@
               "type" : "Urn",
               "doc" : "The entity (e.g. a service URN) which performs the change on behalf of the Actor and must be authorized to act as the Actor.",
               "optional" : true
+            }, {
+              "name" : "message",
+              "type" : "string",
+              "doc" : "Additional context around how DataHub was informed of the particular change. For example: was the change created by an automated process, or manually.",
+              "optional" : true
             } ]
           },
           "doc" : "An AuditStamp corresponding to the creation of this resource/association/sub-resource. A value of 0 for time indicates missing data.",
@@ -185,7 +190,7 @@
         "type" : "enum",
         "name" : "ChartType",
         "doc" : "The various types of charts",
-        "symbols" : [ "BAR", "PIE", "SCATTER", "TABLE", "TEXT", "LINE", "AREA", "HISTOGRAM", "BOX_PLOT" ],
+        "symbols" : [ "BAR", "PIE", "SCATTER", "TABLE", "TEXT", "LINE", "AREA", "HISTOGRAM", "BOX_PLOT", "WORD_CLOUD", "COHORT" ],
         "symbolDocs" : {
           "BAR" : "Chart showing a Bar chart",
           "PIE" : "Chart showing a Pie chart",
@@ -462,8 +467,10 @@
       "doc" : "Instance of the data platform (e.g. db instance)",
       "optional" : true,
       "Searchable" : {
+        "addToFilters" : true,
         "fieldName" : "platformInstance",
-        "fieldType" : "URN"
+        "fieldType" : "URN",
+        "filterNameOverride" : "Platform Instance"
       }
     } ],
     "Aspect" : {
@@ -564,6 +571,10 @@
               }
             },
             "doc" : "Urn of the applied tag",
+            "Relationship" : {
+              "entityTypes" : [ "tag" ],
+              "name" : "TaggedWith"
+            },
             "Searchable" : {
               "addToFilters" : true,
               "fieldName" : "tags",
@@ -571,6 +582,11 @@
               "filterNameOverride" : "Tag",
               "hasValuesFieldName" : "hasTags"
             }
+          }, {
+            "name" : "context",
+            "type" : "string",
+            "doc" : "Additional context about the association",
+            "optional" : true
           } ]
         }
       },
@@ -641,12 +657,22 @@
         }
       },
       "doc" : "Urn of the applied glossary term",
+      "Relationship" : {
+        "entityTypes" : [ "glossaryTerm" ],
+        "name" : "TermedWith"
+      },
       "Searchable" : {
         "addToFilters" : true,
         "fieldName" : "glossaryTerms",
         "fieldType" : "URN",
-        "filterNameOverride" : "Glossary Term"
+        "filterNameOverride" : "Glossary Term",
+        "hasValuesFieldName" : "hasGlossaryTerms"
       }
+    }, {
+      "name" : "context",
+      "type" : "string",
+      "doc" : "Additional context about the association",
+      "optional" : true
     } ]
   }, "com.linkedin.common.GlossaryTermUrn", {
     "type" : "record",
@@ -937,6 +963,21 @@
           "entityTypes" : [ "chart" ],
           "isLineage" : true,
           "name" : "Contains"
+        }
+      }
+    }, {
+      "name" : "datasets",
+      "type" : {
+        "type" : "array",
+        "items" : "com.linkedin.common.Urn"
+      },
+      "doc" : "Datasets consumed by a dashboard",
+      "default" : [ ],
+      "Relationship" : {
+        "/*" : {
+          "entityTypes" : [ "dataset" ],
+          "isLineage" : true,
+          "name" : "Consumes"
         }
       }
     }, {
@@ -1425,6 +1466,12 @@
     }
   }, {
     "type" : "record",
+    "name" : "Aspect",
+    "namespace" : "com.linkedin.entity",
+    "doc" : "Placeholder PDL record to store the aspect in the response. By using this place-holder, metadata-service can return\nany type of aspect without having to define a single union class",
+    "fields" : [ ]
+  }, {
+    "type" : "record",
     "name" : "GlossaryNodeInfo",
     "namespace" : "com.linkedin.glossary",
     "doc" : "Properties associated with a GlossaryNode",
@@ -1437,7 +1484,27 @@
       "name" : "parentNode",
       "type" : "com.linkedin.common.GlossaryNodeUrn",
       "doc" : "Parent node of the glossary term",
-      "optional" : true
+      "optional" : true,
+      "Relationship" : {
+        "entityTypes" : [ "glossaryNode" ],
+        "name" : "IsPartOf"
+      },
+      "Searchable" : {
+        "fieldName" : "parentNode",
+        "fieldType" : "URN",
+        "hasValuesFieldName" : "hasParentNode"
+      }
+    }, {
+      "name" : "name",
+      "type" : "string",
+      "doc" : "Display name of the node",
+      "optional" : true,
+      "Searchable" : {
+        "boostScore" : 10.0,
+        "enableAutocomplete" : true,
+        "fieldName" : "displayName",
+        "fieldType" : "TEXT_PARTIAL"
+      }
     } ],
     "Aspect" : {
       "name" : "glossaryNodeInfo"
@@ -1467,7 +1534,16 @@
       "name" : "parentNode",
       "type" : "com.linkedin.common.GlossaryNodeUrn",
       "doc" : "Parent node of the glossary term",
-      "optional" : true
+      "optional" : true,
+      "Relationship" : {
+        "entityTypes" : [ "glossaryNode" ],
+        "name" : "IsPartOf"
+      },
+      "Searchable" : {
+        "fieldName" : "parentNode",
+        "fieldType" : "URN",
+        "hasValuesFieldName" : "hasParentNode"
+      }
     }, {
       "name" : "termSource",
       "type" : "string",
@@ -1566,6 +1642,11 @@
       "Searchable" : {
         "fieldType" : "TEXT_PARTIAL"
       }
+    }, {
+      "name" : "slack",
+      "type" : "string",
+      "doc" : "Slack channel for the group",
+      "optional" : true
     } ],
     "Aspect" : {
       "EntityUrns" : [ "com.linkedin.common.CorpGroupUrn" ],
@@ -2109,6 +2190,26 @@
                 "fieldType" : "TEXT"
               }
             }, {
+              "name" : "label",
+              "type" : "string",
+              "doc" : "Label of the field. Provides a more human-readable name for the field than field path. Some sources will\nprovide this metadata but not all sources have the concept of a label. If just one string is associated with\na field in a source, that is most likely a description.",
+              "optional" : true,
+              "Searchable" : {
+                "boostScore" : 0.2,
+                "fieldName" : "fieldLabels",
+                "fieldType" : "TEXT"
+              }
+            }, {
+              "name" : "created",
+              "type" : "com.linkedin.common.AuditStamp",
+              "doc" : "An AuditStamp corresponding to the creation of this schema field.",
+              "optional" : true
+            }, {
+              "name" : "lastModified",
+              "type" : "com.linkedin.common.AuditStamp",
+              "doc" : "An AuditStamp corresponding to the last modification of this schema field.",
+              "optional" : true
+            }, {
               "name" : "type",
               "type" : {
                 "type" : "record",
@@ -2226,6 +2327,12 @@
               "type" : "com.linkedin.common.GlobalTags",
               "doc" : "Tags associated with the field",
               "optional" : true,
+              "Relationship" : {
+                "/tags/*/tag" : {
+                  "entityTypes" : [ "tag" ],
+                  "name" : "SchemaFieldTaggedWith"
+                }
+              },
               "Searchable" : {
                 "/tags/*/tag" : {
                   "boostScore" : 0.5,
@@ -2238,6 +2345,12 @@
               "type" : "com.linkedin.common.GlossaryTerms",
               "doc" : "Glossary terms associated with the field",
               "optional" : true,
+              "Relationship" : {
+                "/terms/*/urn" : {
+                  "entityTypes" : [ "glossaryTerm" ],
+                  "name" : "SchemaFieldWithGlossaryTerm"
+                }
+              },
               "Searchable" : {
                 "/terms/*/urn" : {
                   "boostScore" : 0.5,
@@ -2250,6 +2363,11 @@
               "type" : "boolean",
               "doc" : "For schema fields that are part of complex keys, set this field to true\nWe do this to easily distinguish between value and key fields",
               "default" : false
+            }, {
+              "name" : "isPartitioningKey",
+              "type" : "boolean",
+              "doc" : "For Datasets which are partitioned, this determines the partitioning key.",
+              "optional" : true
             }, {
               "name" : "jsonProps",
               "type" : "string",
@@ -2396,6 +2514,12 @@
               "type" : "com.linkedin.common.GlobalTags",
               "doc" : "Tags associated with the field",
               "optional" : true,
+              "Relationship" : {
+                "/tags/*/tag" : {
+                  "entityTypes" : [ "tag" ],
+                  "name" : "EditableSchemaFieldTaggedWith"
+                }
+              },
               "Searchable" : {
                 "/tags/*/tag" : {
                   "boostScore" : 0.5,
@@ -2408,6 +2532,12 @@
               "type" : "com.linkedin.common.GlossaryTerms",
               "doc" : "Glossary terms associated with the field",
               "optional" : true,
+              "Relationship" : {
+                "/terms/*/urn" : {
+                  "entityTypes" : [ "glossaryTerm" ],
+                  "name" : "EditableSchemaFieldWithGlossaryTerm"
+                }
+              },
               "Searchable" : {
                 "/terms/*/urn" : {
                   "boostScore" : 0.5,
@@ -3174,6 +3304,10 @@
     }, {
       "name" : "keyAspect",
       "type" : "boolean"
+    }, {
+      "name" : "aspect",
+      "type" : "com.linkedin.entity.Aspect",
+      "optional" : true
     } ]
   }, {
     "type" : "record",
@@ -3247,6 +3381,27 @@
       },
       "supports" : [ ],
       "actions" : [ {
+        "name" : "describe",
+        "parameters" : [ {
+          "name" : "runId",
+          "type" : "string"
+        }, {
+          "name" : "start",
+          "type" : "int"
+        }, {
+          "name" : "count",
+          "type" : "int"
+        }, {
+          "name" : "includeSoft",
+          "type" : "boolean",
+          "optional" : true
+        }, {
+          "name" : "includeAspect",
+          "type" : "boolean",
+          "optional" : true
+        } ],
+        "returns" : "{ \"type\" : \"array\", \"items\" : \"com.linkedin.metadata.run.AspectRowSummary\" }"
+      }, {
         "name" : "list",
         "doc" : "Retrieves the value for an entity that is made up of latest versions of specified aspects.",
         "parameters" : [ {

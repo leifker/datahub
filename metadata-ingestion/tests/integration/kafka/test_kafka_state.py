@@ -86,7 +86,7 @@ def get_current_checkpoint_from_pipeline(
 ) -> Optional[Checkpoint]:
     kafka_source = cast(KafkaSource, pipeline.source)
     return kafka_source.get_current_checkpoint(
-        kafka_source.get_default_ingestion_job_id()
+        kafka_source.stale_entity_removal_handler.job_id
     )
 
 
@@ -137,7 +137,6 @@ def test_kafka_ingest_with_stateful(
             "reporting": [
                 {
                     "type": "datahub",
-                    "config": {"datahub_api": {"server": GMS_SERVER}},
                 }
             ],
         }
@@ -148,14 +147,10 @@ def test_kafka_ingest_with_stateful(
         ) as kafka_ctx, patch(
             "datahub.ingestion.source.state_provider.datahub_ingestion_checkpointing_provider.DataHubGraph",
             mock_datahub_graph,
-        ) as mock_checkpoint, patch(
-            "datahub.ingestion.reporting.datahub_ingestion_reporting_provider.DataHubGraph",
-            mock_datahub_graph,
-        ) as mock_reporting:
+        ) as mock_checkpoint:
 
             # both checkpoint and reporting will use the same mocked graph instance
             mock_checkpoint.return_value = mock_datahub_graph
-            mock_reporting.return_value = mock_datahub_graph
 
             # 1. Do the first run of the pipeline and get the default job's checkpoint.
             pipeline_run1 = run_and_get_pipeline(pipeline_config_dict)
@@ -178,7 +173,9 @@ def test_kafka_ingest_with_stateful(
             #    part of the second state
             state1 = cast(KafkaCheckpointState, checkpoint1.state)
             state2 = cast(KafkaCheckpointState, checkpoint2.state)
-            difference_urns = list(state1.get_topic_urns_not_in(state2))
+            difference_urns = list(
+                state1.get_urns_not_in(type="topic", other_checkpoint_state=state2)
+            )
 
             assert len(difference_urns) == 1
             assert (
@@ -193,8 +190,8 @@ def test_kafka_ingest_with_stateful(
             # NOTE: The following validation asserts for presence of state as well
             # and validates reporting.
             validate_all_providers_have_committed_successfully(
-                pipeline=pipeline_run1, expected_providers=2
+                pipeline=pipeline_run1, expected_providers=1
             )
             validate_all_providers_have_committed_successfully(
-                pipeline=pipeline_run1, expected_providers=2
+                pipeline=pipeline_run1, expected_providers=1
             )

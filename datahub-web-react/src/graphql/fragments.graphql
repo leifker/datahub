@@ -2,24 +2,57 @@ fragment globalTagsFields on GlobalTags {
     tags {
         tag {
             urn
+            type
             name
             description
             properties {
                 colorHex
             }
         }
+        associatedUrn
+    }
+}
+
+fragment glossaryNode on GlossaryNode {
+    urn
+    type
+    properties {
+        name
+    }
+    children: relationships(input: { types: ["IsPartOf"], direction: INCOMING, start: 0, count: 1000 }) {
+        count
+    }
+}
+
+fragment glossaryTerm on GlossaryTerm {
+    urn
+    name
+    type
+    hierarchicalName
+    properties {
+        name
+        description
+        definition
+        termSource
+        customProperties {
+            key
+            value
+        }
+    }
+    ownership {
+        ...ownershipFields
+    }
+    parentNodes {
+        ...parentNodesFields
     }
 }
 
 fragment glossaryTerms on GlossaryTerms {
     terms {
         term {
-            urn
-            name
-            properties {
-                name
-            }
+            ...glossaryTerm
         }
+        associatedUrn
     }
 }
 
@@ -28,6 +61,20 @@ fragment deprecationFields on Deprecation {
     deprecated
     note
     decommissionTime
+}
+
+fragment parentContainersFields on ParentContainersResult {
+    count
+    containers {
+        ...entityContainer
+    }
+}
+
+fragment parentNodesFields on ParentNodesResult {
+    count
+    nodes {
+        ...glossaryNode
+    }
 }
 
 fragment ownershipFields on Ownership {
@@ -114,6 +161,7 @@ fragment ownershipFields on Ownership {
             }
         }
         type
+        associatedUrn
     }
     lastModified {
         time
@@ -141,8 +189,12 @@ fragment nonRecursiveDatasetFields on Dataset {
     type
     origin
     uri
+    lastIngested
     platform {
         ...platformFields
+    }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
     }
     platformNativeType
     properties {
@@ -164,9 +216,6 @@ fragment nonRecursiveDatasetFields on Dataset {
         ...institutionalMemoryFields
     }
     schemaMetadata(version: 0) {
-        ...schemaMetadataFields
-    }
-    previousSchemaMetadata: schemaMetadata(version: -1) {
         ...schemaMetadataFields
     }
     editableSchemaMetadata {
@@ -256,23 +305,13 @@ fragment nonRecursiveDataJobFields on DataJob {
 fragment dataJobFields on DataJob {
     urn
     type
+    lastIngested
     dataFlow {
         ...nonRecursiveDataFlowFields
     }
     jobId
     ownership {
         ...ownershipFields
-    }
-    inputOutput {
-        inputDatasets {
-            ...nonRecursiveDatasetFields
-        }
-        outputDatasets {
-            ...nonRecursiveDatasetFields
-        }
-        inputDatajobs {
-            ...nonRecursiveDataJobFields
-        }
     }
     properties {
         name
@@ -301,11 +340,18 @@ fragment dataJobFields on DataJob {
     deprecation {
         ...deprecationFields
     }
+    status {
+        removed
+    }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
+    }
 }
 
 fragment dashboardFields on Dashboard {
     urn
     type
+    lastIngested
     tool
     dashboardId
     properties {
@@ -325,6 +371,9 @@ fragment dashboardFields on Dashboard {
             time
         }
     }
+    editableProperties {
+        description
+    }
     ownership {
         ...ownershipFields
     }
@@ -343,8 +392,8 @@ fragment dashboardFields on Dashboard {
     domain {
         ...entityDomain
     }
-    container {
-        ...entityContainer
+    parentContainers {
+        ...parentContainersFields
     }
     status {
         removed
@@ -352,11 +401,40 @@ fragment dashboardFields on Dashboard {
     deprecation {
         ...deprecationFields
     }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
+    }
+    statsSummary {
+        viewCount
+        uniqueUserCountLast30Days
+        topUsersLast30Days {
+            urn
+            type
+            username
+            properties {
+                displayName
+                firstName
+                lastName
+                fullName
+            }
+            editableProperties {
+                displayName
+                pictureLink
+            }
+        }
+    }
+    inputFields {
+        ...inputFieldsFields
+    }
+    subTypes {
+        typeNames
+    }
 }
 
 fragment nonRecursiveMLFeature on MLFeature {
     urn
     type
+    lastIngested
     name
     featureNamespace
     description
@@ -403,6 +481,9 @@ fragment nonRecursiveMLFeature on MLFeature {
     }
     deprecation {
         ...deprecationFields
+    }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
     }
     featureTables: relationships(input: { types: ["Contains"], direction: INCOMING, start: 0, count: 100 }) {
         relationships {
@@ -421,6 +502,7 @@ fragment nonRecursiveMLFeature on MLFeature {
 fragment nonRecursiveMLPrimaryKey on MLPrimaryKey {
     urn
     type
+    lastIngested
     name
     featureNamespace
     description
@@ -468,6 +550,9 @@ fragment nonRecursiveMLPrimaryKey on MLPrimaryKey {
     deprecation {
         ...deprecationFields
     }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
+    }
     featureTables: relationships(input: { types: ["KeyedBy"], direction: INCOMING, start: 0, count: 100 }) {
         relationships {
             type
@@ -485,9 +570,13 @@ fragment nonRecursiveMLPrimaryKey on MLPrimaryKey {
 fragment nonRecursiveMLFeatureTable on MLFeatureTable {
     urn
     type
+    lastIngested
     name
     platform {
         ...platformFields
+    }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
     }
     description
     properties {
@@ -529,6 +618,24 @@ fragment nonRecursiveMLFeatureTable on MLFeatureTable {
     }
 }
 
+fragment schemaFieldFields on SchemaField {
+    fieldPath
+    label
+    jsonPath
+    nullable
+    description
+    type
+    nativeDataType
+    recursive
+    isPartOfKey
+    globalTags {
+        ...globalTagsFields
+    }
+    glossaryTerms {
+        ...glossaryTerms
+    }
+}
+
 fragment schemaMetadataFields on SchemaMetadata {
     aspectVersion
     createdAt
@@ -548,20 +655,7 @@ fragment schemaMetadataFields on SchemaMetadata {
         }
     }
     fields {
-        fieldPath
-        jsonPath
-        nullable
-        description
-        type
-        nativeDataType
-        recursive
-        isPartOfKey
-        globalTags {
-            ...globalTagsFields
-        }
-        glossaryTerms {
-            ...glossaryTerms
-        }
+        ...schemaFieldFields
     }
     primaryKeys
     foreignKeys {
@@ -601,11 +695,15 @@ fragment schemaMetadataFields on SchemaMetadata {
 fragment nonRecursiveMLModel on MLModel {
     urn
     type
+    lastIngested
     name
     description
     origin
     platform {
         ...platformFields
+    }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
     }
     ownership {
         ...ownershipFields
@@ -662,11 +760,15 @@ fragment nonRecursiveMLModel on MLModel {
 fragment nonRecursiveMLModelGroupFields on MLModelGroup {
     urn
     type
+    lastIngested
     name
     description
     origin
     platform {
         ...platformFields
+    }
+    dataPlatformInstance {
+        ...dataPlatformInstanceFields
     }
     ownership {
         ...ownershipFields
@@ -697,6 +799,7 @@ fragment nonRecursiveMLModelGroupFields on MLModelGroup {
 fragment platformFields on DataPlatform {
     urn
     type
+    lastIngested
     name
     properties {
         type
@@ -731,6 +834,15 @@ fragment nonConflictingPlatformFields on DataPlatform {
     }
 }
 
+fragment dataPlatformInstanceFields on DataPlatformInstance {
+    urn
+    type
+    platform {
+        ...platformFields
+    }
+    instanceId
+}
+
 fragment entityContainer on Container {
     urn
     platform {
@@ -747,9 +859,23 @@ fragment entityContainer on Container {
     }
 }
 
-fragment entityDomain on Domain {
-    urn
-    properties {
-        name
+fragment entityDomain on DomainAssociation {
+    domain {
+        urn
+        type
+        properties {
+            name
+            description
+        }
+    }
+    associatedUrn
+}
+
+fragment inputFieldsFields on InputFields {
+    fields {
+        schemaFieldUrn
+        schemaField {
+            ...schemaFieldFields
+        }
     }
 }

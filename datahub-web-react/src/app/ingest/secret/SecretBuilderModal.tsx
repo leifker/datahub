@@ -47,6 +47,7 @@ export const SecretBuilderModal = ({ initialState, visible, onSubmit, onCancel }
             title={<Typography.Text>Create a new Secret</Typography.Text>}
             visible={visible}
             onCancel={onCancel}
+            zIndex={1051} // one higher than other modals - needed for managed ingestion forms
             footer={
                 <>
                     <Button onClick={onCancel} type="text">
@@ -109,7 +110,7 @@ export const SecretBuilderModal = ({ initialState, visible, onSubmit, onCancel }
                         ]}
                         hasFeedback
                     >
-                        <Input
+                        <Input.Password
                             placeholder="The value of your secret"
                             value={secretBuilderState.value}
                             onChange={(event) => setValue(event.target.value)}
